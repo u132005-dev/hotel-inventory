@@ -15,13 +15,6 @@ export default function App() {
   const [selectedLocation, setSelectedLocation] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // 編集中の数量を保持
-  const [editedQuantities, setEditedQuantities] = useState({});
-
-  // 確認モーダル（ダイアログ）用ステート
-  const [confirmModalItem, setConfirmModalItem] = useState(null);
-  const [isUpdating, setIsUpdating] = useState(false);
-
   // データ取得
   const fetchData = async () => {
     try {
@@ -31,15 +24,7 @@ export default function App() {
 
       const { data: itms, error: itmErr } = await supabase.from('items').select('*, locations(name)').order('id');
       if (itmErr) throw itmErr;
-      
       setItems(itms || []);
-
-      // 初期数量の設定
-      const initialQty = {};
-      (itms || []).forEach(item => {
-        initialQty[item.id] = item.quantity;
-      });
-      setEditedQuantities(initialQty);
     } catch (err) {
       console.error('Data fetch error:', err);
     } finally {
@@ -52,12 +37,12 @@ export default function App() {
       fetchData();
       const timer = setInterval(() => {
         fetchData();
-      }, 10000); // 10秒自動ポーリング
+      }, 10000); // 10秒自動更新
       return () => clearInterval(timer);
     }
   }, [authenticated]);
 
-  // パスコード認証処理
+  // パスコード認証
   const handleLogin = (e) => {
     e.preventDefault();
     if (passInput === PASSCODE) {
@@ -74,68 +59,73 @@ export default function App() {
     setAuthenticated(false);
   };
 
-  // 数量変更 (+/- ボタン)
-  const handleQuantityChange = (itemId, delta) => {
-    setEditedQuantities(prev => ({
-      ...prev,
-      [itemId]: Math.max(0, (prev[itemId] ?? 0) + delta)
-    }));
+  // 即時在庫更新処理 (+/- ボタン押下時)
+  const handleQuantityChange = async (item, delta) => {
+    const newQty = Math.max(0, item.quantity + delta);
+    if (newQty === item.quantity) return;
+
+    // 画面の表示を即時更新（UIのレスポンス向上）
+    setItems(prevItems =>
+      prevItems.map(i => (i.id === item.id ? { ...i, quantity: newQty } : i))
+    );
+
+    try {
+      // Supabase更新
+      const { error: updateErr } = await supabase
+        .from('items')
+        .update({ quantity: newQty })
+        .eq('id', item.id);
+
+      if (updateErr) throw updateErr;
+
+      // stock_logs テーブルにログ記録
+      await supabase.from('stock_logs').insert([
+        {
+          item_id: item.id,
+          change_amount: delta,
+          note: '画面操作からの即時更新'
+        }
+      ]);
+    } catch (err) {
+      console.error('Update failed:', err);
+      alert('在庫数の更新に失敗しました。');
+      fetchData(); // 失敗した場合は元のデータに戻す
+    }
   };
 
-  // 直接数値入力
-  const handleQuantityInput = (itemId, value) => {
-    const val = Math.max(0, parseInt(value) || 0);
-    setEditedQuantities(prev => ({
-      ...prev,
-      [itemId]: val
-    }));
-  };
+  // 直接数値入力時の更新処理
+  const handleQuantityInput = async (item, value) => {
+    const newQty = Math.max(0, parseInt(value) || 0);
+    const diff = newQty - item.quantity;
+    if (diff === 0) return;
 
-  // 確認モーダルを開く
-  const openConfirmModal = (item) => {
-    setConfirmModalItem(item);
-  };
-
-  // 確認モーダルを閉じる
-  const closeConfirmModal = () => {
-    setConfirmModalItem(null);
-  };
-
-  // Supabaseへ更新実行
-  const handleConfirmUpdate = async () => {
-    if (!confirmModalItem) return;
-
-    setIsUpdating(true);
-    const targetItem = confirmModalItem;
-    const newQuantity = editedQuantities[targetItem.id] ?? targetItem.quantity;
-    const diff = newQuantity - targetItem.quantity;
+    setItems(prevItems =>
+      prevItems.map(i => (i.id === item.id ? { ...i, quantity: newQty } : i))
+    );
 
     try {
       const { error: updateErr } = await supabase
         .from('items')
-        .update({ quantity: newQuantity })
-        .eq('id', targetItem.id);
+        .update({ quantity: newQty })
+        .eq('id', item.id);
 
       if (updateErr) throw updateErr;
 
       await supabase.from('stock_logs').insert([
         {
-          item_id: targetItem.id,
+          item_id: item.id,
           change_amount: diff,
-          note: '確認ダイアログからの在庫更新'
+          note: '数値直接入力からの更新'
         }
       ]);
-
-      closeConfirmModal();
-      fetchData();
     } catch (err) {
       console.error('Update failed:', err);
-      alert('更新に失敗しました。');
-    } finally {
-      setIsUpdating(false);
+      alert('在庫数の更新に失敗しました。');
+      fetchData();
     }
   };
 
+  // 未ログイン画面
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -166,6 +156,7 @@ export default function App() {
     );
   }
 
+  // 拠点フィルター処理
   const filteredItems = selectedLocation === 'ALL'
     ? items
     : items.filter(i => String(i.location_id) === String(selectedLocation));
@@ -225,14 +216,12 @@ export default function App() {
         ) : (
           <div className="grid gap-3 mt-2">
             {filteredItems.map((item) => {
-              const currentQty = editedQuantities[item.id] ?? item.quantity;
-              const isChanged = currentQty !== item.quantity;
-              const isLow = currentQty <= (item.min_quantity || 0);
+              const isLow = item.quantity <= (item.min_quantity || 0);
 
               return (
                 <div
                   key={item.id}
-                  className={`bg-white p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between shadow-sm gap-3 ${
+                  className={`bg-white p-4 rounded-2xl border flex items-center justify-between shadow-sm ${
                     isLow ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'
                   }`}
                 >
@@ -252,40 +241,25 @@ export default function App() {
                     <p className="text-xs text-slate-400">発注目安: {item.min_quantity || 0} {item.unit || '個'}</p>
                   </div>
 
-                  {/* 数量操作 ＆ 常時表示の更新ボタン */}
-                  <div className="flex items-center justify-between sm:justify-end space-x-3">
-                    {/* +/- 操作ボタン */}
-                    <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 p-1">
-                      <button
-                        onClick={() => handleQuantityChange(item.id, -1)}
-                        className="w-9 h-9 bg-white rounded-lg shadow-sm border text-slate-700 font-bold text-lg hover:bg-slate-100 active:scale-95 transition"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        value={currentQty}
-                        onChange={(e) => handleQuantityInput(item.id, e.target.value)}
-                        className="w-14 text-center font-black text-lg bg-transparent text-slate-800 focus:outline-none"
-                      />
-                      <button
-                        onClick={() => handleQuantityChange(item.id, 1)}
-                        className="w-9 h-9 bg-white rounded-lg shadow-sm border text-slate-700 font-bold text-lg hover:bg-slate-100 active:scale-95 transition"
-                      >
-                        +
-                      </button>
-                    </div>
-
-                    {/* 常時表示される更新ボタン */}
+                  {/* 数量操作 (+/- ボタンのみで即時更新) */}
+                  <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 p-1">
                     <button
-                      onClick={() => openConfirmModal(item)}
-                      className={`px-4 py-2.5 rounded-xl font-bold text-sm transition shadow-sm ${
-                        isChanged
-                          ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95 ring-2 ring-blue-300'
-                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300 active:scale-95'
-                      }`}
+                      onClick={() => handleQuantityChange(item, -1)}
+                      className="w-10 h-10 bg-white rounded-lg shadow-sm border text-slate-700 font-bold text-xl hover:bg-slate-100 active:scale-95 transition"
                     >
-                      {isChanged ? '更新する' : '更新'}
+                      -
+                    </button>
+                    <input
+                      type="number"
+                      value={item.quantity}
+                      onChange={(e) => handleQuantityInput(item, e.target.value)}
+                      className="w-14 text-center font-black text-lg bg-transparent text-slate-800 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => handleQuantityChange(item, 1)}
+                      className="w-10 h-10 bg-white rounded-lg shadow-sm border text-slate-700 font-bold text-xl hover:bg-slate-100 active:scale-95 transition"
+                    >
+                      +
                     </button>
                   </div>
                 </div>
@@ -294,51 +268,6 @@ export default function App() {
           </div>
         )}
       </div>
-
-      {/* 🟢 更新確認ダイアログ (モーダル) */}
-      {confirmModalItem && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4">
-            <div className="text-4xl">❓</div>
-            <div>
-              <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
-                {confirmModalItem.locations?.name}
-              </span>
-              <h3 className="text-lg font-bold text-slate-800 mt-1">{confirmModalItem.name}</h3>
-            </div>
-
-            <div className="bg-slate-50 p-4 rounded-2xl border text-slate-700">
-              <p className="text-xs text-slate-500 mb-1">在庫数を以下の通り更新しますか？</p>
-              <div className="flex items-center justify-center space-x-3 text-lg font-bold">
-                <span className="text-slate-400 line-through">{confirmModalItem.quantity}</span>
-                <span>➔</span>
-                <span className="text-2xl font-black text-blue-600">
-                  {editedQuantities[confirmModalItem.id] ?? confirmModalItem.quantity} {confirmModalItem.unit || '個'}
-                </span>
-              </div>
-            </div>
-
-            {/* ダイアログ内ボタン */}
-            <div className="flex space-x-3 pt-2">
-              <button
-                type="button"
-                onClick={closeConfirmModal}
-                className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-200 transition"
-              >
-                キャンセル
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmUpdate}
-                disabled={isUpdating}
-                className="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-700 shadow transition disabled:opacity-50"
-              >
-                {isUpdating ? '更新中...' : '更新する'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
