@@ -15,7 +15,7 @@ export default function App() {
   const [selectedLocation, setSelectedLocation] = useState('ALL');
   const [loading, setLoading] = useState(true);
 
-  // 編集中の数量をローカルで保持するステート
+  // 編集中の数量を保持
   const [editedQuantities, setEditedQuantities] = useState({});
 
   // 確認モーダル（ダイアログ）用ステート
@@ -74,7 +74,7 @@ export default function App() {
     setAuthenticated(false);
   };
 
-  // 画面上の +/- ボタンでの数量変更
+  // 数量変更 (+/- ボタン)
   const handleQuantityChange = (itemId, delta) => {
     setEditedQuantities(prev => ({
       ...prev,
@@ -82,7 +82,7 @@ export default function App() {
     }));
   };
 
-  // 直接数値入力での数量変更
+  // 直接数値入力
   const handleQuantityInput = (itemId, value) => {
     const val = Math.max(0, parseInt(value) || 0);
     setEditedQuantities(prev => ({
@@ -107,11 +107,10 @@ export default function App() {
 
     setIsUpdating(true);
     const targetItem = confirmModalItem;
-    const newQuantity = editedQuantities[targetItem.id];
+    const newQuantity = editedQuantities[targetItem.id] ?? targetItem.quantity;
     const diff = newQuantity - targetItem.quantity;
 
     try {
-      // items テーブル更新
       const { error: updateErr } = await supabase
         .from('items')
         .update({ quantity: newQuantity })
@@ -119,7 +118,6 @@ export default function App() {
 
       if (updateErr) throw updateErr;
 
-      // stock_logs テーブルに入出庫ログ記録
       await supabase.from('stock_logs').insert([
         {
           item_id: targetItem.id,
@@ -129,7 +127,7 @@ export default function App() {
       ]);
 
       closeConfirmModal();
-      fetchData(); // 即時データ再取得
+      fetchData();
     } catch (err) {
       console.error('Update failed:', err);
       alert('更新に失敗しました。');
@@ -138,7 +136,6 @@ export default function App() {
     }
   };
 
-  // 未ログイン画面
   if (!authenticated) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
@@ -169,7 +166,6 @@ export default function App() {
     );
   }
 
-  // 拠点フィルター処理
   const filteredItems = selectedLocation === 'ALL'
     ? items
     : items.filter(i => String(i.location_id) === String(selectedLocation));
@@ -190,7 +186,7 @@ export default function App() {
         </button>
       </header>
 
-      {/* 拠点（ロケーション）フィルター */}
+      {/* 拠点フィルター */}
       <div className="p-4 max-w-2xl mx-auto">
         <div className="flex space-x-2 overflow-x-auto pb-2">
           <button
@@ -240,7 +236,7 @@ export default function App() {
                     isLow ? 'border-amber-300 bg-amber-50/20' : 'border-slate-200'
                   }`}
                 >
-                  {/* 左側：商品情報 */}
+                  {/* 商品名・拠点 */}
                   <div>
                     <div className="flex items-center space-x-2">
                       <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-medium">
@@ -256,7 +252,7 @@ export default function App() {
                     <p className="text-xs text-slate-400">発注目安: {item.min_quantity || 0} {item.unit || '個'}</p>
                   </div>
 
-                  {/* 右側：数量調整 ＆ 更新ボタン */}
+                  {/* 数量操作 ＆ 常時表示の更新ボタン */}
                   <div className="flex items-center justify-between sm:justify-end space-x-3">
                     {/* +/- 操作ボタン */}
                     <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 p-1">
@@ -280,17 +276,16 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* 更新ボタン */}
+                    {/* 常時表示される更新ボタン */}
                     <button
                       onClick={() => openConfirmModal(item)}
-                      disabled={!isChanged}
                       className={`px-4 py-2.5 rounded-xl font-bold text-sm transition shadow-sm ${
                         isChanged
-                          ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95'
-                          : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                          ? 'bg-blue-600 text-white hover:bg-blue-700 active:scale-95 ring-2 ring-blue-300'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300 active:scale-95'
                       }`}
                     >
-                      更新
+                      {isChanged ? '更新する' : '更新'}
                     </button>
                   </div>
                 </div>
@@ -318,7 +313,7 @@ export default function App() {
                 <span className="text-slate-400 line-through">{confirmModalItem.quantity}</span>
                 <span>➔</span>
                 <span className="text-2xl font-black text-blue-600">
-                  {editedQuantities[confirmModalItem.id]} {confirmModalItem.unit || '個'}
+                  {editedQuantities[confirmModalItem.id] ?? confirmModalItem.quantity} {confirmModalItem.unit || '個'}
                 </span>
               </div>
             </div>
