@@ -95,7 +95,7 @@ export default function App() {
     const previousStock = item.stock_quantity;
     const newStock = Math.max(0, previousStock + delta);
     
-    if (previousStock === newStock && delta < 0) return; // 既に0でマイナスにする場合は処理しない
+    if (previousStock === newStock && delta < 0) return;
 
     // 楽観的UI更新
     setItems(prevItems =>
@@ -119,7 +119,6 @@ export default function App() {
     } catch (error) {
       console.error('在庫更新エラー:', error);
       alert('在庫の更新に失敗しました。最新のデータを再取得します。');
-      // エラー時はロールバック
       setItems(prevItems =>
         prevItems.map(i => i.id === item.id ? { ...i, stock_quantity: previousStock } : i)
       );
@@ -159,9 +158,11 @@ export default function App() {
     e.preventDefault();
     if (!itemFormData.name.trim()) return alert('品名を入力してください');
 
+    // jan_codeが空文字の場合はnullに変換して送信する
     const payload = {
       ...itemFormData,
-      location_id: itemFormData.location_id ? itemFormData.location_id : null
+      location_id: itemFormData.location_id ? itemFormData.location_id : null,
+      jan_code: itemFormData.jan_code.trim() !== '' ? itemFormData.jan_code.trim() : null
     };
 
     try {
@@ -263,7 +264,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 font-sans relative select-none">
       
-      {/* 1. ヘッダー */}
+      {/* ヘッダー */}
       <header className="sticky top-0 z-20 bg-indigo-700 text-white px-4 py-3 shadow-md">
         <div className="max-w-md mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2.5">
@@ -315,7 +316,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 2. トースト通知 */}
+      {/* トースト通知 */}
       {showToast && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg border border-slate-700 flex items-center gap-1.5 animate-bounce">
           <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -325,10 +326,9 @@ export default function App() {
 
       <main className="max-w-md mx-auto p-4 space-y-4">
 
-        {/* --- タブ 1: 在庫入力画面 --- */}
+        {/* タブ 1: 在庫入力画面 */}
         {activeTab === 'inventory' && (
           <>
-            {/* ステータス概要 */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-white border border-slate-200/80 rounded-2xl p-3.5 shadow-sm flex items-center justify-between">
                 <div>
@@ -361,7 +361,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 検索 ＆ カテゴリタブ */}
             <div className="space-y-2.5">
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -391,7 +390,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 在庫カードリスト */}
             {filteredItems.length === 0 ? (
               <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm shadow-sm">
                 該当する消耗品が見つかりません
@@ -480,11 +478,9 @@ export default function App() {
           </>
         )}
 
-        {/* --- タブ 2: マスター設定画面 --- */}
+        {/* タブ 2: マスター設定画面 */}
         {activeTab === 'master' && (
           <div className="space-y-6">
-            
-            {/* 1. 品目（アイテム）マスター */}
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
@@ -538,7 +534,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 2. 保管場所（ロケーション）マスター */}
             <div className="space-y-3 pt-2">
               <div className="flex justify-between items-center">
                 <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
@@ -580,13 +575,12 @@ export default function App() {
                 )}
               </div>
             </div>
-
           </div>
         )}
 
       </main>
 
-      {/* --- モーダル: 品目の追加 ＆ 編集 --- */}
+      {/* モーダル: 品目の追加 ＆ 編集 */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -700,7 +694,7 @@ export default function App() {
         </div>
       )}
 
-      {/* --- モーダル: 保管場所の追加 ＆ 編集 --- */}
+      {/* モーダル: 保管場所の追加 ＆ 編集 */}
       {isLocationModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
