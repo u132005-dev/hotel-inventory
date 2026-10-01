@@ -81,9 +81,23 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
+  // 保管場所名の安全な取得ユーティリティ
+  const getLocationName = (item) => {
+    if (!item.locations) return '未設定';
+    if (Array.isArray(item.locations)) {
+      return item.locations[0]?.name || '未設定';
+    }
+    return item.locations.name || '未設定';
+  };
+
   // 2. 在庫数変更 ＆ ログ記録
   const handleStockChange = async (item, delta) => {
-    const newStock = Math.max(0, item.stock_quantity + delta);
+    const previousStock = item.stock_quantity;
+    const newStock = Math.max(0, previousStock + delta);
+    
+    if (previousStock === newStock && delta < 0) return; // 既に0でマイナスにする場合は処理しない
+
+    // 楽観的UI更新
     setItems(prevItems =>
       prevItems.map(i => i.id === item.id ? { ...i, stock_quantity: newStock } : i)
     );
@@ -104,7 +118,11 @@ export default function App() {
       });
     } catch (error) {
       console.error('在庫更新エラー:', error);
-      alert('在庫の更新に失敗しました');
+      alert('在庫の更新に失敗しました。最新のデータを再取得します。');
+      // エラー時はロールバック
+      setItems(prevItems =>
+        prevItems.map(i => i.id === item.id ? { ...i, stock_quantity: previousStock } : i)
+      );
       fetchAllData();
     }
   };
@@ -117,8 +135,8 @@ export default function App() {
         name: item.name || '',
         category: item.category || 'アメニティ',
         location_id: item.location_id || (locations[0]?.id || ''),
-        stock_quantity: item.stock_quantity || 0,
-        reorder_point: item.reorder_point || 10,
+        stock_quantity: item.stock_quantity ?? 0,
+        reorder_point: item.reorder_point ?? 10,
         unit: item.unit || '個',
         jan_code: item.jan_code || ''
       });
@@ -139,19 +157,24 @@ export default function App() {
 
   const handleSaveItem = async (e) => {
     e.preventDefault();
-    if (!itemFormData.name) return alert('品名を入力してください');
+    if (!itemFormData.name.trim()) return alert('品名を入力してください');
+
+    const payload = {
+      ...itemFormData,
+      location_id: itemFormData.location_id ? itemFormData.location_id : null
+    };
 
     try {
       if (editingItem) {
         const { error } = await supabase
           .from('items')
-          .update(itemFormData)
+          .update(payload)
           .eq('id', editingItem.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('items')
-          .insert([itemFormData]);
+          .insert([payload]);
         if (error) throw error;
       }
       setIsItemModalOpen(false);
@@ -188,19 +211,19 @@ export default function App() {
 
   const handleSaveLocation = async (e) => {
     e.preventDefault();
-    if (!locationName) return alert('保管場所名を入力してください');
+    if (!locationName.trim()) return alert('保管場所名を入力してください');
 
     try {
       if (editingLocation) {
         const { error } = await supabase
           .from('locations')
-          .update({ name: locationName })
+          .update({ name: locationName.trim() })
           .eq('id', editingLocation.id);
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('locations')
-          .insert([{ name: locationName }]);
+          .insert([{ name: locationName.trim() }]);
         if (error) throw error;
       }
       setIsLocationModalOpen(false);
@@ -223,13 +246,14 @@ export default function App() {
     }
   };
 
-  // フィルター
-  const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category)))];
+  // フィルター処理
+  const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
+    const query = searchQuery.toLowerCase();
     const matchesSearch = 
-      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.jan_code && item.jan_code.includes(searchQuery)) ||
-      item.category.toLowerCase().includes(searchQuery.toLowerCase());
+      item.name.toLowerCase().includes(query) ||
+      (item.jan_code && item.jan_code.includes(query)) ||
+      (item.category && item.category.toLowerCase().includes(query));
     const matchesCategory = selectedCategory === 'すべて' || item.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
@@ -237,7 +261,7 @@ export default function App() {
   const lowStockCount = items.filter(i => i.stock_quantity <= i.reorder_point).length;
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 font-sans relative">
+    <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 font-sans relative select-none">
       
       {/* 1. ヘッダー */}
       <header className="sticky top-0 z-20 bg-indigo-700 text-white px-4 py-3 shadow-md">
@@ -259,7 +283,7 @@ export default function App() {
           <button 
             onClick={() => fetchAllData(true)} 
             disabled={loading}
-            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl border border-indigo-400/40 transition text-xs font-bold shadow-sm"
+            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl border border-indigo-400/40 transition text-xs font-bold shadow-sm disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             更新
@@ -393,7 +417,7 @@ export default function App() {
                           </span>
                           <span className="text-[11px] text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60">
                             <MapPin className="w-3 h-3 text-slate-400" />
-                            {item.locations?.name || '未設定'}
+                            {getLocationName(item)}
                           </span>
                         </div>
 
@@ -488,7 +512,7 @@ export default function App() {
                           </span>
                         </div>
                         <p className="text-xs text-slate-400">
-                          保管: {item.locations?.name || '未設定'} | 目安: {item.reorder_point}{item.unit}
+                          保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}
                         </p>
                       </div>
 
@@ -619,7 +643,7 @@ export default function App() {
                     type="number"
                     min="0"
                     value={itemFormData.stock_quantity}
-                    onChange={e => setItemFormData({ ...itemFormData, stock_quantity: parseInt(e.target.value) || 0 })}
+                    onChange={e => setItemFormData({ ...itemFormData, stock_quantity: parseInt(e.target.value, 10) || 0 })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
                   />
                 </div>
@@ -629,7 +653,7 @@ export default function App() {
                     type="number"
                     min="0"
                     value={itemFormData.reorder_point}
-                    onChange={e => setItemFormData({ ...itemFormData, reorder_point: parseInt(e.target.value) || 0 })}
+                    onChange={e => setItemFormData({ ...itemFormData, reorder_point: parseInt(e.target.value, 10) || 0 })}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
                   />
                 </div>
