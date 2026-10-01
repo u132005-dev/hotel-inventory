@@ -29,7 +29,7 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showToast, setShowToast] = useState(false);
 
-  // モーダル用ステート
+  // モーダル用ステート（jan_codeを削除）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [itemFormData, setItemFormData] = useState({
@@ -38,8 +38,7 @@ export default function App() {
     location_id: '',
     stock_quantity: 0,
     reorder_point: 10,
-    unit: '個',
-    jan_code: ''
+    unit: '個'
   });
 
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
@@ -136,8 +135,7 @@ export default function App() {
         location_id: item.location_id || (locations[0]?.id || ''),
         stock_quantity: item.stock_quantity ?? 0,
         reorder_point: item.reorder_point ?? 10,
-        unit: item.unit || '個',
-        jan_code: item.jan_code || ''
+        unit: item.unit || '個'
       });
     } else {
       setEditingItem(null);
@@ -147,8 +145,7 @@ export default function App() {
         location_id: locations[0]?.id || '',
         stock_quantity: 0,
         reorder_point: 10,
-        unit: '個',
-        jan_code: ''
+        unit: '個'
       });
     }
     setIsItemModalOpen(true);
@@ -158,11 +155,14 @@ export default function App() {
     e.preventDefault();
     if (!itemFormData.name.trim()) return alert('品名を入力してください');
 
-    // jan_codeが空文字の場合はnullに変換して送信する
     const payload = {
-      ...itemFormData,
+      name: itemFormData.name.trim(),
+      category: itemFormData.category.trim(),
       location_id: itemFormData.location_id ? itemFormData.location_id : null,
-      jan_code: itemFormData.jan_code.trim() !== '' ? itemFormData.jan_code.trim() : null
+      stock_quantity: itemFormData.stock_quantity,
+      reorder_point: itemFormData.reorder_point,
+      unit: itemFormData.unit.trim(),
+      jan_code: null // JANコードは使わないため常にnull
     };
 
     try {
@@ -247,13 +247,12 @@ export default function App() {
     }
   };
 
-  // フィルター処理
+  // フィルター処理（jan_codeの検索条件を解除）
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
     const query = searchQuery.toLowerCase();
     const matchesSearch = 
       item.name.toLowerCase().includes(query) ||
-      (item.jan_code && item.jan_code.includes(query)) ||
       (item.category && item.category.toLowerCase().includes(query));
     const matchesCategory = selectedCategory === 'すべて' || item.category === selectedCategory;
     return matchesSearch && matchesCategory;
@@ -366,7 +365,7 @@ export default function App() {
                 <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="品名・カテゴリ・コードで検索..."
+                  placeholder="品名・カテゴリで検索..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition shadow-sm"
@@ -580,7 +579,7 @@ export default function App() {
 
       </main>
 
-      {/* モーダル: 品目の追加 ＆ 編集 */}
+      {/* モーダル: 品目の追加 ＆ 編集（JANコード欄を削除済み） */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
@@ -661,17 +660,6 @@ export default function App() {
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-600 mb-1">JANコード（任意）</label>
-                <input
-                  type="text"
-                  value={itemFormData.jan_code}
-                  onChange={e => setItemFormData({ ...itemFormData, jan_code: e.target.value })}
-                  placeholder="バーコードの番号"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                />
               </div>
 
               <div className="pt-3 flex gap-2">
