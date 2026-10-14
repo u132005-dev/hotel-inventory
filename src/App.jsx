@@ -22,7 +22,7 @@ import {
   QrCode,
   Camera
 } from 'lucide-react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'master'
@@ -94,12 +94,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
-  // QRコード・バーコードスキャナーの制御
+  // QRコード・バーコードスキャナーの制御 (スマホカメラ用に最適化)
   useEffect(() => {
     if (isScannerOpen) {
+      const config = {
+        fps: 20, // スキャンフレームレート向上
+        qrbox: { width: 280, height: 160 }, // バーコード読み取り用に横長枠に設定
+        aspectRatio: 1.0,
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.QR_CODE
+        ]
+      };
+
       const scanner = new Html5QrcodeScanner(
         "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        config,
         /* verbose= */ false
       );
 
@@ -117,7 +131,7 @@ export default function App() {
           scanner.clear();
         },
         (error) => {
-          // フレーム単位のエラーは無視
+          // 未検出フレームのエラーは無視
         }
       );
 
