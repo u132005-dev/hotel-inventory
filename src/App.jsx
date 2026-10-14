@@ -171,7 +171,12 @@ export default function App() {
     } else {
       setEditingItem(null);
       setItemFormData({
-        name: '', category: 'アメニティ', location_id: locations[0]?.id || '', stock_quantity: 0, reorder_point: 10, unit: '個'
+        name: '', 
+        category: 'アメニティ', 
+        location_id: locations[0]?.id || '', 
+        stock_quantity: 0, 
+        reorder_point: 10, 
+        unit: '個'
       });
     }
     setIsItemModalOpen(true);
@@ -180,7 +185,15 @@ export default function App() {
   const handleSaveItem = async (e) => {
     e.preventDefault();
     if (!itemFormData.name.trim()) return alert('品名を入力してください');
-    const payload = { ...itemFormData, name: itemFormData.name.trim(), category: itemFormData.category.trim(), unit: itemFormData.unit.trim() };
+    
+    // location_id が空文字の場合は null に変換
+    const payload = { 
+      ...itemFormData, 
+      name: itemFormData.name.trim(), 
+      category: itemFormData.category.trim(), 
+      unit: itemFormData.unit.trim(),
+      location_id: itemFormData.location_id || null
+    };
 
     try {
       if (editingItem) {
@@ -191,6 +204,7 @@ export default function App() {
       setIsItemModalOpen(false);
       fetchAllData(true);
     } catch (error) {
+      console.error('保存エラー:', error);
       alert('保存に失敗しました');
     }
   };
@@ -505,20 +519,49 @@ export default function App() {
         </div>
       )}
 
-      {/* 品目登録・編集モーダル */}
+      {/* 品目登録・編集モーダル (完全版) */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
-            <h3 className="font-bold text-sm mb-2">{editingItem ? '品目の編集' : '新規品目の登録'}</h3>
-            <input type="text" placeholder="品名" value={itemFormData.name} onChange={e => setItemFormData({...itemFormData, name: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+          <form onSubmit={handleSaveItem} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-sm text-slate-800">{editingItem ? '品目の編集' : '新規品目の登録'}</h3>
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 品名 */}
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">品名 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                placeholder="例: シャンプー (個包装)" 
+                value={itemFormData.name} 
+                onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                required
+              />
+            </div>
+
+            {/* カテゴリ ＆ 保管場所 */}
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">カテゴリ</label>
-                <input type="text" value={itemFormData.category} onChange={e => setItemFormData({...itemFormData, category: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+                <input 
+                  type="text" 
+                  placeholder="例: アメニティ" 
+                  value={itemFormData.category} 
+                  onChange={e => setItemFormData({...itemFormData, category: e.target.value})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
               </div>
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">保管場所</label>
-                <select value={itemFormData.location_id} onChange={e => setItemFormData({...itemFormData, location_id: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl">
+                <select 
+                  value={itemFormData.location_id} 
+                  onChange={e => setItemFormData({...itemFormData, location_id: e.target.value})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500"
+                >
                   <option value="">選択してください</option>
                   {locations.map(loc => (
                     <option key={loc.id} value={loc.id}>{loc.name}</option>
@@ -526,39 +569,77 @@ export default function App() {
                 </select>
               </div>
             </div>
+
+            {/* 現在在庫・発注目安・単位 */}
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="text-[10px] text-slate-400 block mb-1">現在在庫</label>
-                <input type="number" value={itemFormData.stock_quantity} onChange={e => setItemFormData({...itemFormData, stock_quantity: parseInt(e.target.value) || 0})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+                <label className="text-[10px] text-slate-400 block mb-1">初期/現在在庫</label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={itemFormData.stock_quantity} 
+                  onChange={e => setItemFormData({...itemFormData, stock_quantity: parseInt(e.target.value) || 0})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
               </div>
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">発注目安</label>
-                <input type="number" value={itemFormData.reorder_point} onChange={e => setItemFormData({...itemFormData, reorder_point: parseInt(e.target.value) || 0})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+                <input 
+                  type="number" 
+                  min="0"
+                  value={itemFormData.reorder_point} 
+                  onChange={e => setItemFormData({...itemFormData, reorder_point: parseInt(e.target.value) || 0})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
               </div>
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">単位</label>
-                <input type="text" value={itemFormData.unit} onChange={e => setItemFormData({...itemFormData, unit: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+                <input 
+                  type="text" 
+                  placeholder="個, 箱" 
+                  value={itemFormData.unit} 
+                  onChange={e => setItemFormData({...itemFormData, unit: e.target.value})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
               </div>
             </div>
+
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2 bg-slate-100 rounded-xl">キャンセル</button>
-              <button type="button" onClick={handleSaveItem} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl">保存</button>
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
       {/* 保管場所登録・編集モーダル */}
       {isLocationModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
-            <h3 className="font-bold text-sm mb-2">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
-            <input type="text" placeholder="保管場所名（例: 1Fリネン室, フロント倉庫）" value={locationName} onChange={e => setLocationName(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2 bg-slate-100 rounded-xl">キャンセル</button>
-              <button type="button" onClick={handleSaveLocation} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl">保存</button>
+          <form onSubmit={handleSaveLocation} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">保管場所名 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                placeholder="例: 1Fリネン室, フロント倉庫" 
+                value={locationName} 
+                onChange={e => setLocationName(e.target.value)} 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                required
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
+            </div>
+          </form>
         </div>
       )}
 
