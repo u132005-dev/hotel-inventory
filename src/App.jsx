@@ -780,4 +780,96 @@ export default function App() {
                   placeholder="例: アメニティ" 
                   value={itemFormData.category} 
                   onChange={e => setItemFormData({...itemFormData, category: e.target.value})} 
-                  className="w-full p-2.5 bg-slate-
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">保管場所</label>
+                <select 
+                  value={itemFormData.location_id} 
+                  onChange={e => setItemFormData({...itemFormData, location_id: e.target.value})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">選択してください</option>
+                  {locations.map(loc => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">初期/現在在庫</label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={itemFormData.stock_quantity} 
+                  onChange={e => setItemFormData({...itemFormData, stock_quantity: parseInt(e.target.value) || 0})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">発注目安</label>
+                <input 
+                  type="number" 
+                  min="0"
+                  value={itemFormData.reorder_point} 
+                  onChange={e => setItemFormData({...itemFormData, reorder_point: parseInt(e.target.value) || 0})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">単位</label>
+                <input 
+                  type="text" 
+                  placeholder="個, 箱" 
+                  value={itemFormData.unit} 
+                  onChange={e => setItemFormData({...itemFormData, unit: e.target.value})} 
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition cursor-pointer">保存</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* 保管場所登録・編集モーダル */}
+      {isLocationModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <form onSubmit={handleSaveLocation} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
+            <div className="flex justify-between items-center mb-1">
+              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">保管場所名 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                placeholder="例: 1Fリネン室, フロント倉庫" 
+                value={locationName} 
+                onChange={e => setLocationName(e.target.value)} 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                required
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition cursor-pointer">保存</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+    </div>
+  );
+}
