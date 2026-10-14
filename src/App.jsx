@@ -37,6 +37,7 @@ export default function App() {
 
   // カメラ・スキャナー用ステート
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerTarget, setScannerTarget] = useState('search'); // 'search' | 'item_name'
   const scannerRef = useRef(null);
 
   // モーダル用ステート（品目）
@@ -104,7 +105,14 @@ export default function App() {
 
       scanner.render(
         (decodedText) => {
-          setSearchQuery(decodedText);
+          if (scannerTarget === 'search') {
+            setSearchQuery(decodedText);
+          } else if (scannerTarget === 'item_name') {
+            setItemFormData(prev => ({
+              ...prev,
+              name: prev.name ? `${prev.name} (${decodedText})` : decodedText
+            }));
+          }
           setIsScannerOpen(false);
           scanner.clear();
         },
@@ -121,7 +129,12 @@ export default function App() {
         }
       };
     }
-  }, [isScannerOpen]);
+  }, [isScannerOpen, scannerTarget]);
+
+  const openScannerFor = (target) => {
+    setScannerTarget(target);
+    setIsScannerOpen(true);
+  };
 
   const getLocationName = (item) => {
     if (!item.locations) return '未設定';
@@ -186,7 +199,6 @@ export default function App() {
     e.preventDefault();
     if (!itemFormData.name.trim()) return alert('品名を入力してください');
     
-    // location_id が空文字の場合は null に変換
     const payload = { 
       ...itemFormData, 
       name: itemFormData.name.trim(), 
@@ -361,7 +373,7 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={() => setIsScannerOpen(true)}
+                  onClick={() => openScannerFor('search')}
                   className="px-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-bold shadow-sm transition shrink-0"
                   title="バーコード/QRスキャン"
                 >
@@ -513,13 +525,13 @@ export default function App() {
             <div id="reader" className="w-full overflow-hidden rounded-xl border border-slate-200"></div>
 
             <p className="text-[11px] text-slate-400 text-center">
-              バーコードまたはQRコードをかざすと、該当の消耗品を自動検索します
+              {scannerTarget === 'item_name' ? '読み取ったバーコードの数字が品名欄に追加されます' : 'バーコードまたはQRコードをかざすと、該当の消耗品を自動検索します'}
             </p>
           </div>
         </div>
       )}
 
-      {/* 品目登録・編集モーダル (完全版) */}
+      {/* 品目登録・編集モーダル */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
           <form onSubmit={handleSaveItem} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
@@ -530,17 +542,28 @@ export default function App() {
               </button>
             </div>
 
-            {/* 品名 */}
+            {/* 品名 ＆ スキャンボタン */}
             <div>
               <label className="text-[10px] text-slate-400 block mb-1">品名 <span className="text-rose-500">*</span></label>
-              <input 
-                type="text" 
-                placeholder="例: シャンプー (個包装)" 
-                value={itemFormData.name} 
-                onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
-                required
-              />
+              <div className="flex gap-1.5">
+                <input 
+                  type="text" 
+                  placeholder="例: シャンプー" 
+                  value={itemFormData.name} 
+                  onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
+                  className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => openScannerFor('item_name')}
+                  className="px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1 font-bold shrink-0 transition"
+                  title="バーコードから読み込み"
+                >
+                  <Camera className="w-4 h-4 text-indigo-600" />
+                  コード読込
+                </button>
+              </div>
             </div>
 
             {/* カテゴリ ＆ 保管場所 */}
