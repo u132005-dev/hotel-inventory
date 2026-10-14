@@ -39,7 +39,7 @@ export default function App() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const scannerRef = useRef(null);
 
-  // モーダル用ステート
+  // モーダル用ステート（品目）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [itemFormData, setItemFormData] = useState({
@@ -51,6 +51,7 @@ export default function App() {
     unit: '個'
   });
 
+  // モーダル用ステート（保管場所）
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState(null);
   const [locationName, setLocationName] = useState('');
@@ -155,7 +156,7 @@ export default function App() {
     }
   };
 
-  // モーダル処理
+  // 品目モーダル処理
   const handleOpenItemModal = (item = null) => {
     if (item) {
       setEditingItem(item);
@@ -198,6 +199,39 @@ export default function App() {
     if (!window.confirm('この品目を削除しますか？')) return;
     try {
       await supabase.from('items').delete().eq('id', id);
+      fetchAllData(true);
+    } catch (error) {
+      alert('削除に失敗しました');
+    }
+  };
+
+  // 保管場所モーダル処理
+  const handleOpenLocationModal = (loc = null) => {
+    setEditingLocation(loc);
+    setLocationName(loc ? loc.name : '');
+    setIsLocationModalOpen(true);
+  };
+
+  const handleSaveLocation = async (e) => {
+    e.preventDefault();
+    if (!locationName.trim()) return alert('保管場所名を入力してください');
+    try {
+      if (editingLocation) {
+        await supabase.from('locations').update({ name: locationName.trim() }).eq('id', editingLocation.id);
+      } else {
+        await supabase.from('locations').insert([{ name: locationName.trim() }]);
+      }
+      setIsLocationModalOpen(false);
+      fetchAllData(true);
+    } catch (error) {
+      alert('保存に失敗しました');
+    }
+  };
+
+  const handleDeleteLocation = async (id) => {
+    if (!window.confirm('この保管場所を削除しますか？')) return;
+    try {
+      await supabase.from('locations').delete().eq('id', id);
       fetchAllData(true);
     } catch (error) {
       alert('削除に失敗しました');
@@ -395,12 +429,14 @@ export default function App() {
         {/* タブ 3: マスター設定 */}
         {activeTab === 'master' && (
           <div className="space-y-6">
+            
+            {/* 1. 品目マスター */}
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><Package className="w-4 h-4 text-indigo-600" /> 品目マスター登録</h2>
+                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><Package className="w-4 h-4 text-indigo-600" /> 品目マスター</h2>
                 <button onClick={() => handleOpenItemModal()} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl flex items-center gap-1"><PlusCircle className="w-4 h-4" /> 品目を追加</button>
               </div>
-              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
                 {items.map(item => (
                   <div key={item.id} className="p-3.5 flex items-center justify-between">
                     <div>
@@ -408,13 +444,37 @@ export default function App() {
                       <p className="text-xs text-slate-400">保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}</p>
                     </div>
                     <div className="flex gap-1">
-                      <button onClick={() => handleOpenItemModal(item)} className="p-2 text-slate-500"><Edit className="w-4 h-4" /></button>
-                      <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-slate-400"><Trash2 className="w-4 h-4" /></button>
+                      <button onClick={() => handleOpenItemModal(item)} className="p-2 text-slate-500 hover:text-indigo-600"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* 2. 保管場所マスター */}
+            <div className="space-y-3 pt-2">
+              <div className="flex justify-between items-center">
+                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><MapPin className="w-4 h-4 text-indigo-600" /> 保管場所マスター</h2>
+                <button onClick={() => handleOpenLocationModal()} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl flex items-center gap-1"><PlusCircle className="w-4 h-4" /> 場所を追加</button>
+              </div>
+              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {locations.length === 0 ? (
+                  <p className="p-4 text-xs text-slate-400 text-center">保管場所が登録されていません</p>
+                ) : (
+                  locations.map(loc => (
+                    <div key={loc.id} className="p-3.5 flex items-center justify-between">
+                      <span className="font-bold text-slate-800 text-sm">{loc.name}</span>
+                      <div className="flex gap-1">
+                        <button onClick={() => handleOpenLocationModal(loc)} className="p-2 text-slate-500 hover:text-indigo-600"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteLocation(loc.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -451,9 +511,52 @@ export default function App() {
           <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
             <h3 className="font-bold text-sm mb-2">{editingItem ? '品目の編集' : '新規品目の登録'}</h3>
             <input type="text" placeholder="品名" value={itemFormData.name} onChange={e => setItemFormData({...itemFormData, name: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">カテゴリ</label>
+                <input type="text" value={itemFormData.category} onChange={e => setItemFormData({...itemFormData, category: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">保管場所</label>
+                <select value={itemFormData.location_id} onChange={e => setItemFormData({...itemFormData, location_id: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl">
+                  <option value="">選択してください</option>
+                  {locations.map(loc => (
+                    <option key={loc.id} value={loc.id}>{loc.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">現在在庫</label>
+                <input type="number" value={itemFormData.stock_quantity} onChange={e => setItemFormData({...itemFormData, stock_quantity: parseInt(e.target.value) || 0})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">発注目安</label>
+                <input type="number" value={itemFormData.reorder_point} onChange={e => setItemFormData({...itemFormData, reorder_point: parseInt(e.target.value) || 0})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-400 block mb-1">単位</label>
+                <input type="text" value={itemFormData.unit} onChange={e => setItemFormData({...itemFormData, unit: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+              </div>
+            </div>
             <div className="flex gap-2 pt-2">
               <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2 bg-slate-100 rounded-xl">キャンセル</button>
               <button type="button" onClick={handleSaveItem} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl">保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 保管場所登録・編集モーダル */}
+      {isLocationModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
+            <h3 className="font-bold text-sm mb-2">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
+            <input type="text" placeholder="保管場所名（例: 1Fリネン室, フロント倉庫）" value={locationName} onChange={e => setLocationName(e.target.value)} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2 bg-slate-100 rounded-xl">キャンセル</button>
+              <button type="button" onClick={handleSaveLocation} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl">保存</button>
             </div>
           </div>
         </div>
