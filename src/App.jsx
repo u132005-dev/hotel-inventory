@@ -18,11 +18,14 @@ import {
   X,
   PlusCircle,
   History,
-  Download
+  Download,
+  BarChart3,
+  TrendingDown
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'master' | 'history'
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'analytics' | 'master'
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -48,14 +51,14 @@ export default function App() {
   const [editingLocation, setEditingLocation] = useState(null);
   const [locationName, setLocationName] = useState('');
 
-  // 1. データ取得 (アイテム ＆ 保管場所 ＆ 履歴)
+  // 1. データ取得
   const fetchAllData = useCallback(async (isManual = false) => {
     setLoading(true);
     try {
       const [itemsRes, locsRes, logsRes] = await Promise.all([
         supabase.from('items').select('*, locations(name)').order('name', { ascending: true }),
         supabase.from('locations').select('*').order('name', { ascending: true }),
-        supabase.from('stock_logs').select('*, items(name)').order('created_at', { ascending: false }).limit(100)
+        supabase.from('stock_logs').select('*, items(name)').order('created_at', { ascending: false }).limit(200)
       ]);
 
       if (itemsRes.error) throw itemsRes.error;
@@ -85,33 +88,22 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
-  // 保管場所名の安全な取得ユーティリティ
   const getLocationName = (item) => {
     if (!item.locations) return '未設定';
-    if (Array.isArray(item.locations)) {
-      return item.locations[0]?.name || '未設定';
-    }
+    if (Array.isArray(item.locations)) return item.locations[0]?.name || '未設定';
     return item.locations.name || '未設定';
   };
 
-  // 2. 在庫数変更 ＆ ログ記録
+  // 2. 在庫数変更
   const handleStockChange = async (item, delta) => {
     const previousStock = item.stock_quantity;
     const newStock = Math.max(0, previousStock + delta);
-    
     if (previousStock === newStock && delta < 0) return;
 
-    // 楽観的UI更新
-    setItems(prevItems =>
-      prevItems.map(i => i.id === item.id ? { ...i, stock_quantity: newStock } : i)
-    );
+    setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: newStock } : i));
 
     try {
-      const { error: updateError } = await supabase
-        .from('items')
-        .update({ stock_quantity: newStock })
-        .eq('id', item.id);
-
+      const { error: updateError } = await supabase.from('items').update({ stock_quantity: newStock }).eq('id', item.id);
       if (updateError) throw updateError;
 
       await supabase.from('stock_logs').insert({
@@ -123,15 +115,13 @@ export default function App() {
       fetchAllData();
     } catch (error) {
       console.error('在庫更新エラー:', error);
-      alert('在庫の更新に失敗しました。最新のデータを再取得します。');
-      setItems(prevItems =>
-        prevItems.map(i => i.id === item.id ? { ...i, stock_quantity: previousStock } : i)
-      );
+      alert('在庫の更新に失敗しました。');
+      setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: previousStock } : i));
       fetchAllData();
     }
   };
 
-  // 3. アイテムの追加・編集・削除
+  // モーダル処理等
   const handleOpenItemModal = (item = null) => {
     if (item) {
       setEditingItem(item);
@@ -146,12 +136,7 @@ export default function App() {
     } else {
       setEditingItem(null);
       setItemFormData({
-        name: '',
-        category: 'アメニティ',
-        location_id: locations[0]?.id || '',
-        stock_quantity: 0,
-        reorder_point: 10,
-        unit: '個'
+        name: '', category: 'アメニティ', location_id: locations[0]?.id || '', stock_quantity: 0, reorder_point: 10, unit: '個'
       });
     }
     setIsItemModalOpen(true);
@@ -160,33 +145,17 @@ export default function App() {
   const handleSaveItem = async (e) => {
     e.preventDefault();
     if (!itemFormData.name.trim()) return alert('品名を入力してください');
-
-    const payload = {
-      name: itemFormData.name.trim(),
-      category: itemFormData.category.trim(),
-      location_id: itemFormData.location_id ? itemFormData.location_id : null,
-      stock_quantity: itemFormData.stock_quantity,
-      reorder_point: itemFormData.reorder_point,
-      unit: itemFormData.unit.trim()
-    };
+    const payload = { ...itemFormData, name: itemFormData.name.trim(), category: itemFormData.category.trim(), unit: itemFormData.unit.trim() };
 
     try {
       if (editingItem) {
-        const { error } = await supabase
-          .from('items')
-          .update(payload)
-          .eq('id', editingItem.id);
-        if (error) throw error;
+        await supabase.from('items').update(payload).eq('id', editingItem.id);
       } else {
-        const { error } = await supabase
-          .from('items')
-          .insert([payload]);
-        if (error) throw error;
+        await supabase.from('items').insert([payload]);
       }
       setIsItemModalOpen(false);
       fetchAllData(true);
     } catch (error) {
-      console.error('アイテム保存エラー:', error);
       alert('保存に失敗しました');
     }
   };
@@ -194,48 +163,31 @@ export default function App() {
   const handleDeleteItem = async (id) => {
     if (!window.confirm('この品目を削除しますか？')) return;
     try {
-      const { error } = await supabase.from('items').delete().eq('id', id);
-      if (error) throw error;
+      await supabase.from('items').delete().eq('id', id);
       fetchAllData(true);
     } catch (error) {
-      console.error('削除エラー:', error);
-      alert('削除に失敗しました（ログが存在する可能性があります）');
+      alert('削除に失敗しました');
     }
   };
 
-  // 4. 保管場所の追加・編集・削除
   const handleOpenLocationModal = (loc = null) => {
-    if (loc) {
-      setEditingLocation(loc);
-      setLocationName(loc.name);
-    } else {
-      setEditingLocation(null);
-      setLocationName('');
-    }
+    setEditingLocation(loc);
+    setLocationName(loc ? loc.name : '');
     setIsLocationModalOpen(true);
   };
 
   const handleSaveLocation = async (e) => {
     e.preventDefault();
     if (!locationName.trim()) return alert('保管場所名を入力してください');
-
     try {
       if (editingLocation) {
-        const { error } = await supabase
-          .from('locations')
-          .update({ name: locationName.trim() })
-          .eq('id', editingLocation.id);
-        if (error) throw error;
+        await supabase.from('locations').update({ name: locationName.trim() }).eq('id', editingLocation.id);
       } else {
-        const { error } = await supabase
-          .from('locations')
-          .insert([{ name: locationName.trim() }]);
-        if (error) throw error;
+        await supabase.from('locations').insert([{ name: locationName.trim() }]);
       }
       setIsLocationModalOpen(false);
       fetchAllData(true);
     } catch (error) {
-      console.error('保管場所保存エラー:', error);
       alert('保存に失敗しました');
     }
   };
@@ -243,19 +195,15 @@ export default function App() {
   const handleDeleteLocation = async (id) => {
     if (!window.confirm('この保管場所を削除しますか？')) return;
     try {
-      const { error } = await supabase.from('locations').delete().eq('id', id);
-      if (error) throw error;
+      await supabase.from('locations').delete().eq('id', id);
       fetchAllData(true);
     } catch (error) {
-      console.error('削除エラー:', error);
-      alert('削除に失敗しました（品目が紐づいている可能性があります）');
+      alert('削除に失敗しました');
     }
   };
 
-  // 5. CSVダウンロード機能
   const exportLogsToCSV = () => {
     if (logs.length === 0) return alert('出力する履歴データがありません');
-
     const headers = ['日時', '品名', '種別', '変動数', '担当者'];
     const rows = logs.map(log => [
       log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : '',
@@ -264,7 +212,6 @@ export default function App() {
       log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty,
       log.staff_name || 'スタッフ'
     ]);
-
     const csvContent = '\uFEFF' + [headers, ...rows].map(e => e.map(val => `"${val}"`).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -276,17 +223,30 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // フィルター処理
+  // データ分析用集計（消費数TOP5）
+  const getTopConsumedItems = () => {
+    const consumptionMap = {};
+    logs.forEach(log => {
+      if (log.change_qty < 0 && log.items?.name) {
+        const name = log.items.name;
+        const qty = Math.abs(log.change_qty);
+        consumptionMap[name] = (consumptionMap[name] || 0) + qty;
+      }
+    });
+
+    return Object.entries(consumptionMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  };
+
+  const topConsumedData = getTopConsumedItems();
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
     const query = searchQuery.toLowerCase();
-    const matchesSearch = 
-      item.name.toLowerCase().includes(query) ||
-      (item.category && item.category.toLowerCase().includes(query));
-    const matchesCategory = selectedCategory === 'すべて' || item.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    return (item.name.toLowerCase().includes(query) || (item.category && item.category.toLowerCase().includes(query))) &&
+           (selectedCategory === 'すべて' || item.category === selectedCategory);
   });
-
   const lowStockCount = items.filter(i => i.stock_quantity <= i.reorder_point).length;
 
   return (
@@ -300,71 +260,43 @@ export default function App() {
               <Building2 className="w-5 h-5 text-indigo-100" />
             </div>
             <div>
-              <h1 className="text-base font-extrabold tracking-wide text-white">
-                ホテル消耗品 在庫Navi
-              </h1>
-              <p className="text-[10px] text-indigo-200">
-                {lastUpdated ? `最終更新: ${lastUpdated}` : 'リアルタイム管理'}
-              </p>
+              <h1 className="text-base font-extrabold tracking-wide text-white">ホテル消耗品 在庫Navi</h1>
+              <p className="text-[10px] text-indigo-200">{lastUpdated ? `最終更新: ${lastUpdated}` : 'リアルタイム管理'}</p>
             </div>
           </div>
 
-          <button 
-            onClick={() => fetchAllData(true)} 
-            disabled={loading}
-            className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl border border-indigo-400/40 transition text-xs font-bold shadow-sm disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            更新
+          <button onClick={() => fetchAllData(true)} disabled={loading} className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl border border-indigo-400/40 transition text-xs font-bold shadow-sm disabled:opacity-50">
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> 更新
           </button>
         </div>
 
-        {/* タブ切替ナビゲーション */}
-        <div className="max-w-md mx-auto flex mt-3 bg-indigo-800/50 p-1 rounded-xl gap-1">
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
-              activeTab === 'inventory' 
-                ? 'bg-white text-indigo-800 shadow-sm' 
-                : 'text-indigo-100 hover:bg-indigo-600/50'
-            }`}
-          >
-            <Package className="w-3.5 h-3.5" /> 在庫入力
+        {/* タブ切替 */}
+        <div className="max-w-md mx-auto flex mt-3 bg-indigo-800/50 p-1 rounded-xl gap-1 text-xs font-bold">
+          <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'inventory' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
+            <Package className="w-3.5 h-3.5" /> 在庫
           </button>
-          <button
-            onClick={() => setActiveTab('history')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
-              activeTab === 'history' 
-                ? 'bg-white text-indigo-800 shadow-sm' 
-                : 'text-indigo-100 hover:bg-indigo-600/50'
-            }`}
-          >
+          <button onClick={() => setActiveTab('history')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'history' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
             <History className="w-3.5 h-3.5" /> 履歴
           </button>
-          <button
-            onClick={() => setActiveTab('master')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
-              activeTab === 'master' 
-                ? 'bg-white text-indigo-800 shadow-sm' 
-                : 'text-indigo-100 hover:bg-indigo-600/50'
-            }`}
-          >
+          <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
+            <BarChart3 className="w-3.5 h-3.5" /> 分析
+          </button>
+          <button onClick={() => setActiveTab('master')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'master' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
             <Settings className="w-3.5 h-3.5" /> 設定
           </button>
         </div>
       </header>
 
-      {/* トースト通知 */}
+      {/* トースト */}
       {showToast && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full shadow-lg border border-slate-700 flex items-center gap-1.5 animate-bounce">
-          <Check className="w-3.5 h-3.5 text-emerald-400" />
-          最新のデータを取得しました
+          <Check className="w-3.5 h-3.5 text-emerald-400" /> 最新のデータを取得しました
         </div>
       )}
 
       <main className="max-w-md mx-auto p-4 space-y-4">
 
-        {/* タブ 1: 在庫入力画面 */}
+        {/* タブ 1: 在庫入力 */}
         {activeTab === 'inventory' && (
           <>
             <div className="grid grid-cols-2 gap-3">
@@ -373,27 +305,15 @@ export default function App() {
                   <span className="text-xs text-slate-500 block font-medium">登録品目数</span>
                   <span className="text-2xl font-black text-slate-800">{items.length} <span className="text-xs font-normal text-slate-500">品</span></span>
                 </div>
-                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-                  <Layers className="w-5 h-5" />
-                </div>
+                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100"><Layers className="w-5 h-5" /></div>
               </div>
 
-              <div className={`border rounded-2xl p-3.5 shadow-sm flex items-center justify-between transition ${
-                lowStockCount > 0 
-                  ? 'bg-amber-50/80 border-amber-300 text-amber-900' 
-                  : 'bg-emerald-50/80 border-emerald-300 text-emerald-900'
-              }`}>
+              <div className={`border rounded-2xl p-3.5 shadow-sm flex items-center justify-between transition ${lowStockCount > 0 ? 'bg-amber-50/80 border-amber-300 text-amber-900' : 'bg-emerald-50/80 border-emerald-300 text-emerald-900'}`}>
                 <div>
                   <span className="text-xs text-slate-500 block font-medium">要発注アラート</span>
-                  <span className={`text-2xl font-black ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {lowStockCount} <span className="text-xs font-normal text-slate-500">品</span>
-                  </span>
+                  <span className={`text-2xl font-black ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{lowStockCount} <span className="text-xs font-normal text-slate-500">品</span></span>
                 </div>
-                <div className={`p-2.5 rounded-xl border ${
-                  lowStockCount > 0 
-                    ? 'bg-amber-100 text-amber-600 border-amber-200 animate-pulse' 
-                    : 'bg-emerald-100 text-emerald-600 border-emerald-200'
-                }`}>
+                <div className={`p-2.5 rounded-xl border ${lowStockCount > 0 ? 'bg-amber-100 text-amber-600 border-amber-200 animate-pulse' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>
                   {lowStockCount > 0 ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
                 </div>
               </div>
@@ -402,258 +322,129 @@ export default function App() {
             <div className="space-y-2.5">
               <div className="relative">
                 <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="品名・カテゴリで検索..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition shadow-sm"
-                />
+                <input type="text" placeholder="品名・カテゴリで検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
               </div>
 
               <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
                 {categories.map(cat => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-3.5 py-1.5 rounded-xl whitespace-nowrap font-bold transition ${
-                      selectedCategory === cat
-                        ? 'bg-indigo-600 text-white shadow-sm border border-indigo-600'
-                        : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200 shadow-sm'
-                    }`}
-                  >
+                  <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-3.5 py-1.5 rounded-xl whitespace-nowrap font-bold transition ${selectedCategory === cat ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 shadow-sm'}`}>
                     {cat}
                   </button>
                 ))}
               </div>
             </div>
 
-            {filteredItems.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-sm shadow-sm">
-                該当する消耗品が見つかりません
-              </div>
-            ) : (
-              <div className="space-y-3.5">
-                {filteredItems.map(item => {
-                  const isLowStock = item.stock_quantity <= item.reorder_point;
+            <div className="space-y-3.5">
+              {filteredItems.map(item => {
+                const isLowStock = item.stock_quantity <= item.reorder_point;
+                return (
+                  <div key={item.id} className={`relative overflow-hidden bg-white rounded-2xl p-4 shadow-sm border transition ${isLowStock ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200/90'}`}>
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-md">{item.category}</span>
+                        <span className="text-[11px] text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60"><MapPin className="w-3 h-3 text-slate-400" />{getLocationName(item)}</span>
+                      </div>
+                      {isLowStock && <span className="text-[11px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><AlertTriangle className="w-3 h-3 text-amber-600" /> 要発注</span>}
+                    </div>
 
-                  return (
-                    <div 
-                      key={item.id} 
-                      className={`relative overflow-hidden bg-white rounded-2xl p-4 shadow-sm border transition ${
-                        isLowStock 
-                          ? 'border-amber-300 bg-amber-50/30' 
-                          : 'border-slate-200/90 hover:border-indigo-200'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start gap-2 mb-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-md">
-                            {item.category}
-                          </span>
-                          <span className="text-[11px] text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60">
-                            <MapPin className="w-3 h-3 text-slate-400" />
-                            {getLocationName(item)}
-                          </span>
+                    <h2 className="font-bold text-slate-800 text-base mb-3 tracking-wide">{item.name}</h2>
+
+                    <div className="flex justify-between items-end pt-3 border-t border-slate-100">
+                      <div>
+                        <span className="text-[11px] text-slate-400 block mb-0.5 font-medium">目安発注: {item.reorder_point} {item.unit}</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className={`text-3xl font-black tracking-tight ${isLowStock ? 'text-amber-600' : 'text-slate-800'}`}>{item.stock_quantity}</span>
+                          <span className="text-xs font-bold text-slate-500">{item.unit}</span>
                         </div>
-
-                        {isLowStock && (
-                          <span className="text-[11px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 shrink-0 animate-pulse">
-                            <AlertTriangle className="w-3 h-3 text-amber-600" /> 要発注
-                          </span>
-                        )}
                       </div>
 
-                      <h2 className="font-bold text-slate-800 text-base mb-3 tracking-wide">{item.name}</h2>
-
-                      <div className="flex justify-between items-end pt-3 border-t border-slate-100">
-                        <div>
-                          <span className="text-[11px] text-slate-400 block mb-0.5 font-medium">
-                            目安発注: {item.reorder_point} {item.unit}
-                          </span>
-                          <div className="flex items-baseline gap-1">
-                            <span className={`text-3xl font-black tracking-tight ${
-                              isLowStock ? 'text-amber-600' : 'text-slate-800'
-                            }`}>
-                              {item.stock_quantity}
-                            </span>
-                            <span className="text-xs font-bold text-slate-500">{item.unit}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => handleStockChange(item, -10)}
-                            className="h-10 px-2.5 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 rounded-xl text-xs font-bold transition border border-slate-200"
-                          >
-                            -10
-                          </button>
-                          <button
-                            onClick={() => handleStockChange(item, -1)}
-                            className="h-10 w-10 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-600 rounded-xl text-sm font-bold transition border border-rose-200 flex items-center justify-center"
-                          >
-                            <Minus className="w-4 h-4 stroke-[2.5]" />
-                          </button>
-                          <button
-                            onClick={() => handleStockChange(item, 1)}
-                            className="h-10 w-10 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-600 rounded-xl text-sm font-bold transition border border-emerald-200 flex items-center justify-center"
-                          >
-                            <Plus className="w-4 h-4 stroke-[2.5]" />
-                          </button>
-                          <button
-                            onClick={() => handleStockChange(item, 10)}
-                            className="h-10 px-2.5 bg-indigo-50 hover:bg-indigo-100 active:scale-95 text-indigo-700 rounded-xl text-xs font-bold transition border border-indigo-200 shadow-sm"
-                          >
-                            +10
-                          </button>
-                        </div>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => handleStockChange(item, -10)} className="h-10 px-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold border border-slate-200">-10</button>
+                        <button onClick={() => handleStockChange(item, -1)} className="h-10 w-10 bg-rose-50 text-rose-600 rounded-xl text-sm font-bold border border-rose-200 flex items-center justify-center"><Minus className="w-4 h-4 stroke-[2.5]" /></button>
+                        <button onClick={() => handleStockChange(item, 1)} className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold border border-emerald-200 flex items-center justify-center"><Plus className="w-4 h-4 stroke-[2.5]" /></button>
+                        <button onClick={() => handleStockChange(item, 10)} className="h-10 px-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold border border-indigo-200 shadow-sm">+10</button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
 
-        {/* タブ 2: 履歴画面 */}
+        {/* タブ 2: 履歴 */}
         {activeTab === 'history' && (
           <div className="space-y-3">
             <div className="flex justify-between items-center">
-              <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
-                <History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴 (直近100件)
-              </h2>
-              <button
-                onClick={exportLogsToCSV}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm transition"
-              >
-                <Download className="w-3.5 h-3.5" /> CSV出力
-              </button>
+              <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴</h2>
+              <button onClick={exportLogsToCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm"><Download className="w-3.5 h-3.5" /> CSV出力</button>
             </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-              {logs.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-400">履歴データがありません</div>
-              ) : (
-                logs.map(log => (
-                  <div key={log.id} className="p-3.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition">
-                    <div>
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="font-bold text-slate-800 text-sm">{log.items?.name || '削除された品目'}</span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          log.change_qty > 0 
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                            : 'bg-rose-50 text-rose-700 border-rose-100'
-                        }`}>
-                          {log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400">
-                        {log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : ''} | {log.staff_name || 'スタッフ'}
-                      </p>
+            <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+              {logs.map(log => (
+                <div key={log.id} className="p-3.5 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="font-bold text-slate-800 text-sm">{log.items?.name || '削除された品目'}</span>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${log.change_qty > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>{log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty}</span>
                     </div>
+                    <p className="text-[11px] text-slate-400">{log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : ''} | {log.staff_name || 'スタッフ'}</p>
                   </div>
-                ))
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* タブ 3: 分析（ダッシュボード） */}
+        {activeTab === 'analytics' && (
+          <div className="space-y-4">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              <h2 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <TrendingDown className="w-4 h-4 text-indigo-600" /> 消費数ランキング (累計TOP 5)
+              </h2>
+              {topConsumedData.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">消費データがありません</p>
+              ) : (
+                <div className="h-56 w-full pt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topConsumedData} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                      <XAxis type="number" hide />
+                      <YAxis dataKey="name" type="category" scale="band" tick={{ fontSize: 11, fill: '#475569' }} width={80} />
+                      <Tooltip formatter={(value) => [`${value} 個消費`, '消費量']} />
+                      <Bar dataKey="count" radius={[0, 8, 8, 0]}>
+                        {topConsumedData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'][index % 5]} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               )}
             </div>
           </div>
         )}
 
-        {/* タブ 3: マスター設定画面 */}
+        {/* タブ 4: マスター設定 */}
         {activeTab === 'master' && (
           <div className="space-y-6">
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
-                  <Package className="w-4 h-4 text-indigo-600" /> 品目マスター登録
-                </h2>
-                <button
-                  onClick={() => handleOpenItemModal()}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm"
-                >
-                  <PlusCircle className="w-4 h-4" /> 品目を追加
-                </button>
+                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><Package className="w-4 h-4 text-indigo-600" /> 品目マスター登録</h2>
+                <button onClick={() => handleOpenItemModal()} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl flex items-center gap-1"><PlusCircle className="w-4 h-4" /> 品目を追加</button>
               </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                {items.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400">品目が登録されていません</div>
-                ) : (
-                  items.map(item => (
-                    <div key={item.id} className="p-3.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition">
-                      <div>
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-bold text-slate-800 text-sm">{item.name}</span>
-                          <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded border border-indigo-100">
-                            {item.category}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-400">
-                          保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenItemModal(item)}
-                          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                          title="編集"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteItem(item.id)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                          title="削除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100">
+                {items.map(item => (
+                  <div key={item.id} className="p-3.5 flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-slate-800 text-sm">{item.name}</span>
+                      <p className="text-xs text-slate-400">保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}</p>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div className="flex justify-between items-center">
-                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
-                  <MapPin className="w-4 h-4 text-indigo-600" /> 保管場所マスター
-                </h2>
-                <button
-                  onClick={() => handleOpenLocationModal()}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm"
-                >
-                  <PlusCircle className="w-4 h-4" /> 保管場所を追加
-                </button>
-              </div>
-
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                {locations.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-slate-400">保管場所が登録されていません</div>
-                ) : (
-                  locations.map(loc => (
-                    <div key={loc.id} className="p-3.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition">
-                      <span className="font-bold text-slate-800 text-sm">{loc.name}</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenLocationModal(loc)}
-                          className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                          title="編集"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteLocation(loc.id)}
-                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                          title="削除"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => handleOpenItemModal(item)} className="p-2 text-slate-500"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-slate-400"><Trash2 className="w-4 h-4" /></button>
                     </div>
-                  ))
-                )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -661,149 +452,16 @@ export default function App() {
 
       </main>
 
-      {/* モーダル: 品目の追加 ＆ 編集 */}
+      {/* モーダル群 (省略なし) */}
       {isItemModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-5 py-4 bg-indigo-700 text-white flex justify-between items-center">
-              <h3 className="font-bold text-base">{editingItem ? '品目の編集' : '新規品目の登録'}</h3>
-              <button onClick={() => setIsItemModalOpen(false)} className="text-indigo-200 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
+            <h3 className="font-bold text-sm mb-2">{editingItem ? '品目の編集' : '新規品目の登録'}</h3>
+            <input type="text" placeholder="品名" value={itemFormData.name} onChange={e => setItemFormData({...itemFormData, name: e.target.value})} className="w-full p-2.5 bg-slate-50 border rounded-xl" />
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2 bg-slate-100 rounded-xl">キャンセル</button>
+              <button type="button" onClick={handleSaveItem} className="flex-1 py-2 bg-indigo-600 text-white rounded-xl">保存</button>
             </div>
-
-            <form onSubmit={handleSaveItem} className="p-5 space-y-3.5 text-xs font-semibold">
-              <div>
-                <label className="block text-slate-600 mb-1">品名 <span className="text-rose-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  value={itemFormData.name}
-                  onChange={e => setItemFormData({ ...itemFormData, name: e.target.value })}
-                  placeholder="例: フェイスタオル"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 mb-1">カテゴリ</label>
-                  <input
-                    type="text"
-                    value={itemFormData.category}
-                    onChange={e => setItemFormData({ ...itemFormData, category: e.target.value })}
-                    placeholder="例: リネン"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 mb-1">保管場所</label>
-                  <select
-                    value={itemFormData.location_id}
-                    onChange={e => setItemFormData({ ...itemFormData, location_id: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                  >
-                    <option value="">未選択</option>
-                    {locations.map(loc => (
-                      <option key={loc.id} value={loc.id}>{loc.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-slate-600 mb-1">現在の在庫</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={itemFormData.stock_quantity}
-                    onChange={e => setItemFormData({ ...itemFormData, stock_quantity: parseInt(e.target.value, 10) || 0 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 mb-1">目安発注数</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={itemFormData.reorder_point}
-                    onChange={e => setItemFormData({ ...itemFormData, reorder_point: parseInt(e.target.value, 10) || 0 })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-600 mb-1">単位</label>
-                  <input
-                    type="text"
-                    value={itemFormData.unit}
-                    onChange={e => setItemFormData({ ...itemFormData, unit: e.target.value })}
-                    placeholder="枚, 本, 個"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsItemModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
-                >
-                  キャンセル
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition shadow-md"
-                >
-                  保存する
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* モーダル: 保管場所の追加 ＆ 編集 */}
-      {isLocationModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-5 py-4 bg-slate-800 text-white flex justify-between items-center">
-              <h3 className="font-bold text-base">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
-              <button onClick={() => setIsLocationModalOpen(false)} className="text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveLocation} className="p-5 space-y-4 text-xs font-semibold">
-              <div>
-                <label className="block text-slate-600 mb-1">保管場所名 <span className="text-rose-500">*</span></label>
-                <input
-                  type="text"
-                  required
-                  value={locationName}
-                  onChange={e => setLocationName(e.target.value)}
-                  placeholder="例: 3F リネン室"
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500 focus:bg-white"
-                />
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsLocationModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
-                >
-                  キャンセル
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl transition shadow-md"
-                >
-                  保存する
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
