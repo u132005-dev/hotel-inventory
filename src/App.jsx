@@ -16,13 +16,16 @@ import {
   Edit,
   Trash2,
   X,
-  PlusCircle
+  PlusCircle,
+  History,
+  Download
 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'master'
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'master' | 'history'
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('すべて');
@@ -45,13 +48,14 @@ export default function App() {
   const [editingLocation, setEditingLocation] = useState(null);
   const [locationName, setLocationName] = useState('');
 
-  // 1. データ取得 (アイテム ＆ 保管場所)
+  // 1. データ取得 (アイテム ＆ 保管場所 ＆ 履歴)
   const fetchAllData = useCallback(async (isManual = false) => {
     setLoading(true);
     try {
-      const [itemsRes, locsRes] = await Promise.all([
+      const [itemsRes, locsRes, logsRes] = await Promise.all([
         supabase.from('items').select('*, locations(name)').order('name', { ascending: true }),
-        supabase.from('locations').select('*').order('name', { ascending: true })
+        supabase.from('locations').select('*').order('name', { ascending: true }),
+        supabase.from('stock_logs').select('*, items(name)').order('created_at', { ascending: false }).limit(100)
       ]);
 
       if (itemsRes.error) throw itemsRes.error;
@@ -59,6 +63,7 @@ export default function App() {
 
       setItems(itemsRes.data || []);
       setLocations(locsRes.data || []);
+      setLogs(logsRes.data || []);
 
       const now = new Date();
       setLastUpdated(now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -115,6 +120,7 @@ export default function App() {
         type: delta < 0 ? 'consumption' : 'restock',
         staff_name: 'フロントスタッフ'
       });
+      fetchAllData();
     } catch (error) {
       console.error('在庫更新エラー:', error);
       alert('在庫の更新に失敗しました。最新のデータを再取得します。');
@@ -246,6 +252,30 @@ export default function App() {
     }
   };
 
+  // 5. CSVダウンロード機能
+  const exportLogsToCSV = () => {
+    if (logs.length === 0) return alert('出力する履歴データがありません');
+
+    const headers = ['日時', '品名', '種別', '変動数', '担当者'];
+    const rows = logs.map(log => [
+      log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : '',
+      log.items?.name || '削除された品目',
+      log.type === 'consumption' ? '消費' : '補充',
+      log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty,
+      log.staff_name || 'スタッフ'
+    ]);
+
+    const csvContent = '\uFEFF' + [headers, ...rows].map(e => e.map(val => `"${val}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `在庫移動履歴_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // フィルター処理
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
@@ -293,7 +323,7 @@ export default function App() {
         <div className="max-w-md mx-auto flex mt-3 bg-indigo-800/50 p-1 rounded-xl gap-1">
           <button
             onClick={() => setActiveTab('inventory')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
               activeTab === 'inventory' 
                 ? 'bg-white text-indigo-800 shadow-sm' 
                 : 'text-indigo-100 hover:bg-indigo-600/50'
@@ -302,14 +332,24 @@ export default function App() {
             <Package className="w-3.5 h-3.5" /> 在庫入力
           </button>
           <button
+            onClick={() => setActiveTab('history')}
+            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
+              activeTab === 'history' 
+                ? 'bg-white text-indigo-800 shadow-sm' 
+                : 'text-indigo-100 hover:bg-indigo-600/50'
+            }`}
+          >
+            <History className="w-3.5 h-3.5" /> 履歴
+          </button>
+          <button
             onClick={() => setActiveTab('master')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 ${
               activeTab === 'master' 
                 ? 'bg-white text-indigo-800 shadow-sm' 
                 : 'text-indigo-100 hover:bg-indigo-600/50'
             }`}
           >
-            <Settings className="w-3.5 h-3.5" /> マスター設定
+            <Settings className="w-3.5 h-3.5" /> 設定
           </button>
         </div>
       </header>
@@ -476,7 +516,50 @@ export default function App() {
           </>
         )}
 
-        {/* タブ 2: マスター設定画面 */}
+        {/* タブ 2: 履歴画面 */}
+        {activeTab === 'history' && (
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5">
+                <History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴 (直近100件)
+              </h2>
+              <button
+                onClick={exportLogsToCSV}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm transition"
+              >
+                <Download className="w-3.5 h-3.5" /> CSV出力
+              </button>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
+              {logs.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">履歴データがありません</div>
+              ) : (
+                logs.map(log => (
+                  <div key={log.id} className="p-3.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition">
+                    <div>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="font-bold text-slate-800 text-sm">{log.items?.name || '削除された品目'}</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          log.change_qty > 0 
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                            : 'bg-rose-50 text-rose-700 border-rose-100'
+                        }`}>
+                          {log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        {log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : ''} | {log.staff_name || 'スタッフ'}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* タブ 3: マスター設定画面 */}
         {activeTab === 'master' && (
           <div className="space-y-6">
             <div className="space-y-3">
