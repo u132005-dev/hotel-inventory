@@ -31,7 +31,9 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [masterSearchQuery, setMasterSearchQuery] = useState(''); // マスター設定用の検索窓ステート
   const [selectedCategory, setSelectedCategory] = useState('すべて');
+  const [selectedLocation, setSelectedLocation] = useState('すべて');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showToast, setShowToast] = useState(false);
 
@@ -42,7 +44,7 @@ export default function App() {
   const [isOrderListModalOpen, setIsOrderListModalOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // 棚卸しモード用ステート（一時的な入力値を保持: { [itemId]: number }）
+  // 棚卸しモード用ステート
   const [inventoryCounts, setInventoryCounts] = useState({});
   const [isSavingInventory, setIsSavingInventory] = useState(false);
 
@@ -81,7 +83,6 @@ export default function App() {
       setLocations(locsRes.data || []);
       setLogs(logsRes.data || []);
 
-      // 棚卸し用の一時ステートを初期化
       const initialCounts = {};
       fetchedItems.forEach(item => {
         initialCounts[item.id] = item.stock_quantity;
@@ -121,23 +122,13 @@ export default function App() {
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
+    recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event) => {
       const speechText = event.results[0][0].transcript;
       setSearchQuery(speechText.replace(/[。、！？]/g, ''));
     };
-
-    recognition.onerror = (event) => {
-      console.error('音声認識エラー:', event.error);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
 
     recognition.start();
   };
@@ -148,7 +139,7 @@ export default function App() {
     return item.locations.name || '未設定';
   };
 
-  // 在庫数変更（通常タブ）
+  // 在庫数変更
   const handleStockChange = async (item, delta) => {
     const previousStock = item.stock_quantity;
     const newStock = Math.max(0, previousStock + delta);
@@ -187,7 +178,6 @@ export default function App() {
 
         const delta = newQty - item.stock_quantity;
 
-        // 品目の在庫数更新
         const { error: updateError } = await supabase
           .from('items')
           .update({ stock_quantity: newQty })
@@ -195,7 +185,6 @@ export default function App() {
 
         if (updateError) throw updateError;
 
-        // 履歴ログの記録
         await supabase.from('stock_logs').insert({
           item_id: item.id,
           change_qty: delta,
@@ -335,7 +324,6 @@ export default function App() {
   const lowStockItems = items.filter(i => i.stock_quantity <= i.reorder_point);
   const lowStockCount = lowStockItems.length;
 
-  // 発注リストのクリップボードコピー
   const copyOrderListToClipboard = () => {
     const textList = lowStockItems.map(item => `・${item.name}: 現在 ${item.stock_quantity}${item.unit} (目安: ${item.reorder_point}${item.unit}) [保管: ${getLocationName(item)}]`).join('\n');
     const header = `【要発注リスト】 (${new Date().toLocaleDateString('ja-JP')})\n`;
@@ -348,10 +336,23 @@ export default function App() {
   };
 
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
+  const locationTabs = ['すべて', ...locations.map(l => l.name)];
+
+  // 在庫タブ用のフィルタリング
   const filteredItems = items.filter(item => {
     const query = searchQuery.toLowerCase();
-    return (item.name.toLowerCase().includes(query) || (item.category && item.category.toLowerCase().includes(query))) &&
-           (selectedCategory === 'すべて' || item.category === selectedCategory);
+    const matchesSearch = item.name.toLowerCase().includes(query) || (item.category && item.category.toLowerCase().includes(query));
+    const matchesCategory = selectedCategory === 'すべて' || item.category === selectedCategory;
+    const itemLocName = getLocationName(item);
+    const matchesLocation = selectedLocation === 'すべて' || itemLocName === selectedLocation;
+
+    return matchesSearch && matchesCategory && matchesLocation;
+  });
+
+  // マスター設定（品目）用のフィルタリング
+  const filteredMasterItems = items.filter(item => {
+    const query = masterSearchQuery.toLowerCase();
+    return item.name.toLowerCase().includes(query) || (item.category && item.category.toLowerCase().includes(query));
   });
 
   return (
@@ -421,7 +422,7 @@ export default function App() {
                 <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100"><Layers className="w-5 h-5" /></div>
               </div>
 
-              {/* 要発注アラートカード（発注リスト確認ボタン付き） */}
+              {/* 要発注アラートカード */}
               <div className={`border rounded-2xl p-3.5 shadow-sm flex flex-col justify-between transition ${lowStockCount > 0 ? 'bg-amber-50/90 border-amber-300 text-amber-900' : 'bg-emerald-50/90 border-emerald-300 text-emerald-900'}`}>
                 <div className="flex items-center justify-between">
                   <div>
@@ -456,7 +457,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 音声入力ボタン */}
                 <button
                   type="button"
                   onClick={handleVoiceSearch}
@@ -468,7 +468,19 @@ export default function App() {
                 </button>
               </div>
 
-              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+              {/* 保管場所別の絞り込みタブ */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-xs">
+                <span className="text-[10px] font-bold text-slate-400 shrink-0 pl-0.5 flex items-center gap-0.5"><MapPin className="w-3 h-3" /> 場所:</span>
+                {locationTabs.map(loc => (
+                  <button key={loc} onClick={() => setSelectedLocation(loc)} className={`px-3 py-1 rounded-lg whitespace-nowrap font-bold transition ${selectedLocation === loc ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200'}`}>
+                    {loc}
+                  </button>
+                ))}
+              </div>
+
+              {/* カテゴリ別の絞り込みタブ */}
+              <div className="flex items-center gap-1 overflow-x-auto pb-1 no-scrollbar text-xs">
+                <span className="text-[10px] font-bold text-slate-400 shrink-0 pl-0.5 flex items-center gap-0.5"><Layers className="w-3 h-3" /> 分類:</span>
                 {categories.map(cat => (
                   <button key={cat} onClick={() => setSelectedCategory(cat)} className={`px-3.5 py-1.5 rounded-xl whitespace-nowrap font-bold transition ${selectedCategory === cat ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 shadow-sm'}`}>
                     {cat}
@@ -478,39 +490,43 @@ export default function App() {
             </div>
 
             <div className="space-y-3.5">
-              {filteredItems.map(item => {
-                const isLowStock = item.stock_quantity <= item.reorder_point;
-                return (
-                  <div key={item.id} className={`relative overflow-hidden bg-white rounded-2xl p-4 shadow-sm border transition ${isLowStock ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200/90'}`}>
-                    <div className="flex justify-between items-start gap-2 mb-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-md">{item.category}</span>
-                        <span className="text-[11px] text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60"><MapPin className="w-3 h-3 text-slate-400" />{getLocationName(item)}</span>
+              {filteredItems.length === 0 ? (
+                <p className="text-center text-xs text-slate-400 py-8">該当する品目がありません</p>
+              ) : (
+                filteredItems.map(item => {
+                  const isLowStock = item.stock_quantity <= item.reorder_point;
+                  return (
+                    <div key={item.id} className={`relative overflow-hidden bg-white rounded-2xl p-4 shadow-sm border transition ${isLowStock ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200/90'}`}>
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-md">{item.category}</span>
+                          <span className="text-[11px] text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60"><MapPin className="w-3 h-3 text-slate-400" />{getLocationName(item)}</span>
+                        </div>
+                        {isLowStock && <span className="text-[11px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><AlertTriangle className="w-3 h-3 text-amber-600" /> 要発注</span>}
                       </div>
-                      {isLowStock && <span className="text-[11px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse"><AlertTriangle className="w-3 h-3 text-amber-600" /> 要発注</span>}
-                    </div>
 
-                    <h2 className="font-bold text-slate-800 text-base mb-3 tracking-wide">{item.name}</h2>
+                      <h2 className="font-bold text-slate-800 text-base mb-3 tracking-wide">{item.name}</h2>
 
-                    <div className="flex justify-between items-end pt-3 border-t border-slate-100">
-                      <div>
-                        <span className="text-[11px] text-slate-400 block mb-0.5 font-medium">目安発注: {item.reorder_point} {item.unit}</span>
-                        <div className="flex items-baseline gap-1">
-                          <span className={`text-3xl font-black tracking-tight ${isLowStock ? 'text-amber-600' : 'text-slate-800'}`}>{item.stock_quantity}</span>
-                          <span className="text-xs font-bold text-slate-500">{item.unit}</span>
+                      <div className="flex justify-between items-end pt-3 border-t border-slate-100">
+                        <div>
+                          <span className="text-[11px] text-slate-400 block mb-0.5 font-medium">目安発注: {item.reorder_point} {item.unit}</span>
+                          <div className="flex items-baseline gap-1">
+                            <span className={`text-3xl font-black tracking-tight ${isLowStock ? 'text-amber-600' : 'text-slate-800'}`}>{item.stock_quantity}</span>
+                            <span className="text-xs font-bold text-slate-500">{item.unit}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => handleStockChange(item, -10)} className="h-10 px-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold border border-slate-200">-10</button>
+                          <button onClick={() => handleStockChange(item, -1)} className="h-10 w-10 bg-rose-50 text-rose-600 rounded-xl text-sm font-bold border border-rose-200 flex items-center justify-center"><Minus className="w-4 h-4 stroke-[2.5]" /></button>
+                          <button onClick={() => handleStockChange(item, 1)} className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold border border-emerald-200 flex items-center justify-center"><Plus className="w-4 h-4 stroke-[2.5]" /></button>
+                          <button onClick={() => handleStockChange(item, 10)} className="h-10 px-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold border border-indigo-200 shadow-sm">+10</button>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-1.5">
-                        <button onClick={() => handleStockChange(item, -10)} className="h-10 px-2.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold border border-slate-200">-10</button>
-                        <button onClick={() => handleStockChange(item, -1)} className="h-10 w-10 bg-rose-50 text-rose-600 rounded-xl text-sm font-bold border border-rose-200 flex items-center justify-center"><Minus className="w-4 h-4 stroke-[2.5]" /></button>
-                        <button onClick={() => handleStockChange(item, 1)} className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-xl text-sm font-bold border border-emerald-200 flex items-center justify-center"><Plus className="w-4 h-4 stroke-[2.5]" /></button>
-                        <button onClick={() => handleStockChange(item, 10)} className="h-10 px-2.5 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold border border-indigo-200 shadow-sm">+10</button>
-                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </>
         )}
@@ -519,7 +535,6 @@ export default function App() {
         {activeTab === 'history' && (
           <div className="space-y-6">
             
-            {/* 棚卸し一括更新セクション（履歴タブの最上部） */}
             <div className="bg-white rounded-2xl border border-indigo-200 p-4 shadow-sm space-y-3">
               <div className="flex justify-between items-center pb-2 border-b border-slate-100">
                 <div>
@@ -563,7 +578,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 履歴一覧セクション */}
             <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴</h2>
@@ -601,19 +615,44 @@ export default function App() {
                 <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><Package className="w-4 h-4 text-indigo-600" /> 品目マスター</h2>
                 <button onClick={() => handleOpenItemModal()} className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-bold rounded-xl flex items-center gap-1"><PlusCircle className="w-4 h-4" /> 品目を追加</button>
               </div>
-              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-                {items.map(item => (
-                  <div key={item.id} className="p-3.5 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-slate-800 text-sm">{item.name}</span>
-                      <p className="text-xs text-slate-400">保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}</p>
+
+              {/* 品目マスター用 検索窓 */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                <input 
+                  type="text" 
+                  placeholder="品名・カテゴリで絞り込み..." 
+                  value={masterSearchQuery} 
+                  onChange={(e) => setMasterSearchQuery(e.target.value)} 
+                  className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" 
+                />
+                {masterSearchQuery && (
+                  <button onClick={() => setMasterSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden max-h-96 overflow-y-auto">
+                {filteredMasterItems.length === 0 ? (
+                  <p className="p-4 text-xs text-slate-400 text-center">該当する品目がありません</p>
+                ) : (
+                  filteredMasterItems.map(item => (
+                    <div key={item.id} className="p-3.5 flex items-center justify-between">
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="font-bold text-slate-800 text-sm">{item.name}</span>
+                          <span className="text-[10px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{item.category}</span>
+                        </div>
+                        <p className="text-xs text-slate-400">保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}</p>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => handleOpenItemModal(item)} className="p-2 text-slate-500 hover:text-indigo-600"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => handleOpenItemModal(item)} className="p-2 text-slate-500 hover:text-indigo-600"><Edit className="w-4 h-4" /></button>
-                      <button onClick={() => handleDeleteItem(item.id)} className="p-2 text-slate-400 hover:text-rose-600"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 
@@ -707,10 +746,10 @@ export default function App() {
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-400 block mb-1">品名・バーコード番号 <span className="text-rose-500">*</span></label>
+              <label className="text-[10px] text-slate-400 block mb-1">品名 <span className="text-rose-500">*</span></label>
               <input 
                 type="text" 
-                placeholder="例: シャンプー または JANコード数字" 
+                placeholder="例: シャンプー" 
                 value={itemFormData.name} 
                 onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
