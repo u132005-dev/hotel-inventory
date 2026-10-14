@@ -19,8 +19,7 @@ import {
   PlusCircle,
   History,
   Download,
-  Mic,
-  MicOff
+  Mic
 } from 'lucide-react';
 
 export default function App() {
@@ -110,7 +109,6 @@ export default function App() {
 
     recognition.onresult = (event) => {
       const speechText = event.results[0][0].transcript;
-      // 末尾の句点などを除去して検索窓にセット
       setSearchQuery(speechText.replace(/[。、！？]/g, ''));
     };
 
@@ -365,7 +363,7 @@ export default function App() {
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                  <input type="text" placeholder="品名・バーコード番号で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
+                  <input type="text" placeholder="品名で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
                   {searchQuery && (
                     <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
                       <X className="w-4 h-4" />
@@ -373,13 +371,14 @@ export default function App() {
                   )}
                 </div>
 
-                {/* 音声入力ボタン */}
+                {/* 音声入力ボタン (確実に表示されるよう調整) */}
                 <button
+                  type="button"
                   onClick={handleVoiceSearch}
-                  className="px-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-bold shadow-sm transition shrink-0"
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-extrabold shadow-sm transition shrink-0 cursor-pointer"
                   title="音声で検索"
                 >
-                  <Mic className="w-4 h-4" />
+                  <Mic className="w-4 h-4 text-white" />
                   音声
                 </button>
               </div>
@@ -603,4 +602,32 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
           <form onSubmit={handleSaveLocation} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
             <div className="flex justify-between items-center mb-1">
-              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の
+              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-[10px] text-slate-400 block mb-1">保管場所名 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                placeholder="例: 1Fリネン室, フロント倉庫" 
+                value={locationName} 
+                onChange={e => setLocationName(e.target.value)} 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                required
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+    </div>
+  );
+}
