@@ -20,7 +20,8 @@ import {
   History,
   Download,
   ClipboardList,
-  Copy
+  Copy,
+  CheckSquare
 } from 'lucide-react';
 
 export default function App() {
@@ -40,6 +41,10 @@ export default function App() {
   // 発注リストモーダル用ステート
   const [isOrderListModalOpen, setIsOrderListModalOpen] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // 棚卸しモード用ステート（一時的な入力値を保持: { [itemId]: number }）
+  const [inventoryCounts, setInventoryCounts] = useState({});
+  const [isSavingInventory, setIsSavingInventory] = useState(false);
 
   // モーダル用ステート（品目）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -71,9 +76,17 @@ export default function App() {
       if (itemsRes.error) throw itemsRes.error;
       if (locsRes.error) throw locsRes.error;
 
-      setItems(itemsRes.data || []);
+      const fetchedItems = itemsRes.data || [];
+      setItems(fetchedItems);
       setLocations(locsRes.data || []);
       setLogs(logsRes.data || []);
+
+      // 棚卸し用の一時ステートを初期化
+      const initialCounts = {};
+      fetchedItems.forEach(item => {
+        initialCounts[item.id] = item.stock_quantity;
+      });
+      setInventoryCounts(initialCounts);
 
       const now = new Date();
       setLastUpdated(now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -135,13 +148,14 @@ export default function App() {
     return item.locations.name || '未設定';
   };
 
-  // 在庫数変更
+  // 在庫数変更（通常タブ）
   const handleStockChange = async (item, delta) => {
     const previousStock = item.stock_quantity;
     const newStock = Math.max(0, previousStock + delta);
     if (previousStock === newStock && delta < 0) return;
 
     setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: newStock } : i));
+    setInventoryCounts(prev => ({ ...prev, [item.id]: newStock }));
 
     try {
       const { error: updateError } = await supabase.from('items').update({ stock_quantity: newStock }).eq('id', item.id);
@@ -157,8 +171,47 @@ export default function App() {
     } catch (error) {
       console.error('在庫更新エラー:', error);
       alert('在庫の更新に失敗しました。');
-      setItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: previousStock } : i));
       fetchAllData();
+    }
+  };
+
+  // 棚卸し一括保存処理
+  const handleSaveBatchInventory = async () => {
+    if (!window.confirm('入力された数値で棚卸しを確定し、在庫数を一括更新しますか？')) return;
+    setIsSavingInventory(true);
+
+    try {
+      for (const item of items) {
+        const newQty = parseInt(inventoryCounts[item.id], 10);
+        if (isNaN(newQty) || newQty === item.stock_quantity) continue;
+
+        const delta = newQty - item.stock_quantity;
+
+        // 品目の在庫数更新
+        const { error: updateError } = await supabase
+          .from('items')
+          .update({ stock_quantity: newQty })
+          .eq('id', item.id);
+
+        if (updateError) throw updateError;
+
+        // 履歴ログの記録
+        await supabase.from('stock_logs').insert({
+          item_id: item.id,
+          change_qty: delta,
+          type: delta < 0 ? 'consumption' : 'restock',
+          staff_name: '棚卸しスタッフ'
+        });
+      }
+
+      alert('棚卸しによる在庫の一括更新が完了しました！');
+      fetchAllData(true);
+    } catch (error) {
+      console.error('一括更新エラー:', error);
+      alert('一括更新に失敗しました。');
+      fetchAllData();
+    } finally {
+      setIsSavingInventory(false);
     }
   };
 
@@ -328,7 +381,7 @@ export default function App() {
             <Package className="w-3.5 h-3.5" /> 在庫
           </button>
           <button onClick={() => setActiveTab('history')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'history' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
-            <History className="w-3.5 h-3.5" /> 履歴
+            <History className="w-3.5 h-3.5" /> 履歴・棚卸し
           </button>
           <button onClick={() => setActiveTab('master')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'master' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
             <Settings className="w-3.5 h-3.5" /> 設定
@@ -462,26 +515,79 @@ export default function App() {
           </>
         )}
 
-        {/* タブ 2: 履歴 */}
+        {/* タブ 2: 履歴・棚卸しモード */}
         {activeTab === 'history' && (
-          <div className="space-y-3">
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴</h2>
-              <button onClick={exportLogsToCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm"><Download className="w-3.5 h-3.5" /> CSV出力</button>
-            </div>
-            <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
-              {logs.map(log => (
-                <div key={log.id} className="p-3.5 flex items-center justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-bold text-slate-800 text-sm">{log.items?.name || '削除された品目'}</span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${log.change_qty > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>{log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty}</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400">{log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : ''} | {log.staff_name || 'スタッフ'}</p>
-                  </div>
+          <div className="space-y-6">
+            
+            {/* 棚卸し一括更新セクション（履歴タブの最上部） */}
+            <div className="bg-white rounded-2xl border border-indigo-200 p-4 shadow-sm space-y-3">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                <div>
+                  <h2 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                    <CheckSquare className="w-4 h-4 text-indigo-600" /> 棚卸し 一括更新モード
+                  </h2>
+                  <p className="text-[11px] text-slate-400">実際の数量を入力してまとめて更新できます</p>
                 </div>
-              ))}
+                <button 
+                  onClick={handleSaveBatchInventory} 
+                  disabled={isSavingInventory || items.length === 0}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold rounded-xl shadow-sm transition disabled:opacity-50 cursor-pointer"
+                >
+                  {isSavingInventory ? '保存中...' : '一括保存する'}
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {items.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-4">登録されている品目がありません</p>
+                ) : (
+                  items.map(item => (
+                    <div key={item.id} className="flex items-center justify-between gap-2 p-2 bg-slate-50 rounded-xl border border-slate-200/60">
+                      <div>
+                        <span className="font-bold text-slate-800 text-xs block">{item.name}</span>
+                        <span className="text-[10px] text-slate-400">保管: {getLocationName(item)} / (現在: {item.stock_quantity}{item.unit})</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input 
+                          type="number" 
+                          min="0"
+                          value={inventoryCounts[item.id] ?? item.stock_quantity}
+                          onChange={(e) => setInventoryCounts({ ...inventoryCounts, [item.id]: e.target.value })}
+                          className="w-16 p-1.5 bg-white border border-slate-300 rounded-lg text-center font-bold text-slate-800 text-sm focus:outline-none focus:border-indigo-500"
+                        />
+                        <span className="text-xs text-slate-500 font-medium">{item.unit}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
+
+            {/* 履歴一覧セクション */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <h2 className="font-bold text-slate-800 text-base flex items-center gap-1.5"><History className="w-4 h-4 text-indigo-600" /> 在庫変動履歴</h2>
+                <button onClick={exportLogsToCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-xl flex items-center gap-1 shadow-sm cursor-pointer"><Download className="w-3.5 h-3.5" /> CSV出力</button>
+              </div>
+              <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+                {logs.length === 0 ? (
+                  <p className="p-4 text-xs text-slate-400 text-center">履歴データがありません</p>
+                ) : (
+                  logs.map(log => (
+                    <div key={log.id} className="p-3.5 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold text-slate-800 text-sm">{log.items?.name || '削除された品目'}</span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${log.change_qty > 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-rose-50 text-rose-700 border-rose-100'}`}>{log.change_qty > 0 ? `+${log.change_qty}` : log.change_qty}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">{log.created_at ? new Date(log.created_at).toLocaleString('ja-JP') : ''} | {log.staff_name || 'スタッフ'}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -580,7 +686,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setIsOrderListModalOpen(false)} 
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
               >
                 閉じる
               </button>
@@ -672,8 +778,8 @@ export default function App() {
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
-              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
+              <button type="button" onClick={() => setIsItemModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition cursor-pointer">保存</button>
             </div>
           </form>
         </div>
@@ -703,8 +809,8 @@ export default function App() {
             </div>
 
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
-              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
+              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer">キャンセル</button>
+              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition cursor-pointer">保存</button>
             </div>
           </form>
         </div>
