@@ -18,7 +18,9 @@ import {
   X,
   PlusCircle,
   History,
-  Download
+  Download,
+  Mic,
+  MicOff
 } from 'lucide-react';
 
 export default function App() {
@@ -31,6 +33,9 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('すべて');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showToast, setShowToast] = useState(false);
+
+  // 音声入力用ステート
+  const [isListening, setIsListening] = useState(false);
 
   // モーダル用ステート（品目）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -85,6 +90,41 @@ export default function App() {
     const interval = setInterval(() => fetchAllData(false), 30000);
     return () => clearInterval(interval);
   }, [fetchAllData]);
+
+  // 音声入力（Web Speech API）の制御
+  const handleVoiceSearch = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('お使いのブラウザは音声入力に対応していません。ChromeやSafariをご利用ください。');
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ja-JP';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onresult = (event) => {
+      const speechText = event.results[0][0].transcript;
+      // 末尾の句点などを除去して検索窓にセット
+      setSearchQuery(speechText.replace(/[。、！？]/g, ''));
+    };
+
+    recognition.onerror = (event) => {
+      console.error('音声認識エラー:', event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
 
   const getLocationName = (item) => {
     if (!item.locations) return '未設定';
@@ -285,6 +325,17 @@ export default function App() {
         </div>
       )}
 
+      {/* 音声入力中の通知オーバーレイ */}
+      {isListening && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-white space-y-3">
+          <div className="w-16 h-16 bg-rose-600 rounded-full flex items-center justify-center animate-ping">
+            <Mic className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-base font-bold tracking-wide animate-pulse">お話しください...</p>
+          <p className="text-xs text-slate-300">例: 「シャンプー」「タオル」など</p>
+        </div>
+      )}
+
       <main className="max-w-md mx-auto p-4 space-y-4">
 
         {/* タブ 1: 在庫入力 */}
@@ -311,14 +362,26 @@ export default function App() {
             </div>
 
             <div className="space-y-2.5">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                <input type="text" placeholder="品名・バーコード番号で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
-                  </button>
-                )}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                  <input type="text" placeholder="品名・バーコード番号で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 音声入力ボタン */}
+                <button
+                  onClick={handleVoiceSearch}
+                  className="px-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-bold shadow-sm transition shrink-0"
+                  title="音声で検索"
+                >
+                  <Mic className="w-4 h-4" />
+                  音声
+                </button>
               </div>
 
               <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
@@ -456,7 +519,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* 品名 */}
             <div>
               <label className="text-[10px] text-slate-400 block mb-1">品名・バーコード番号 <span className="text-rose-500">*</span></label>
               <input 
@@ -469,7 +531,6 @@ export default function App() {
               />
             </div>
 
-            {/* カテゴリ ＆ 保管場所 */}
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">カテゴリ</label>
@@ -496,7 +557,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 現在在庫・発注目安・単位 */}
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-[10px] text-slate-400 block mb-1">初期/現在在庫</label>
@@ -543,32 +603,4 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
           <form onSubmit={handleSaveLocation} className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold shadow-xl">
             <div className="flex justify-between items-center mb-1">
-              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の登録'}</h3>
-              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div>
-              <label className="text-[10px] text-slate-400 block mb-1">保管場所名 <span className="text-rose-500">*</span></label>
-              <input 
-                type="text" 
-                placeholder="例: 1Fリネン室, フロント倉庫" 
-                value={locationName} 
-                onChange={e => getLocationName && setLocationName(e.target.value)} 
-                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
-                required
-              />
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setIsLocationModalOpen(false)} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">キャンセル</button>
-              <button type="submit" className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition">保存</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-    </div>
-  );
-}
+              <h3 className="font-bold text-sm text-slate-800">{editingLocation ? '保管場所の編集' : '新規保管場所の
