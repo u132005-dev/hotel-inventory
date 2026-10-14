@@ -94,12 +94,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
-  // QRコード・バーコードスキャナーの制御 (スマホカメラ用に最適化)
+  // QRコード・バーコードスキャナーの制御 (ピント・離した位置での読み取りに最適化)
   useEffect(() => {
     if (isScannerOpen) {
       const config = {
-        fps: 20, // スキャンフレームレート向上
-        qrbox: { width: 280, height: 160 }, // バーコード読み取り用に横長枠に設定
+        fps: 25,
+        // 枠を大きめに設定し、スマホを20cm程度離した位置でピントが合うように調整
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+          const width = Math.min(viewfinderWidth * 0.85, 320);
+          const height = Math.min(viewfinderHeight * 0.45, 180);
+          return { width: Math.max(width, 240), height: Math.max(height, 120) };
+        },
         aspectRatio: 1.0,
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13,
@@ -131,7 +136,7 @@ export default function App() {
           scanner.clear();
         },
         (error) => {
-          // 未検出フレームのエラーは無視
+          // 未検出フレームはスルー
         }
       );
 
@@ -538,8 +543,8 @@ export default function App() {
 
             <div id="reader" className="w-full overflow-hidden rounded-xl border border-slate-200"></div>
 
-            <p className="text-[11px] text-slate-400 text-center">
-              {scannerTarget === 'item_name' ? '読み取ったバーコードの数字が品名欄に追加されます' : 'バーコードまたはQRコードをかざすと、該当の消耗品を自動検索します'}
+            <p className="text-[11px] font-semibold text-indigo-600 text-center bg-indigo-50 py-1.5 rounded-lg border border-indigo-100">
+              💡 スマホを【15〜20cmほど離して】かざすとピントが合います
             </p>
           </div>
         </div>
