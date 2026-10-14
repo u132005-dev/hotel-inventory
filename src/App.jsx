@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from './supabaseClient';
 import { 
   Package, 
@@ -18,11 +18,8 @@ import {
   X,
   PlusCircle,
   History,
-  Download,
-  QrCode,
-  Camera
+  Download
 } from 'lucide-react';
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'master'
@@ -34,11 +31,6 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('すべて');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showToast, setShowToast] = useState(false);
-
-  // カメラ・スキャナー用ステート
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerTarget, setScannerTarget] = useState('search'); // 'search' | 'item_name'
-  const scannerRef = useRef(null);
 
   // モーダル用ステート（品目）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -93,67 +85,6 @@ export default function App() {
     const interval = setInterval(() => fetchAllData(false), 30000);
     return () => clearInterval(interval);
   }, [fetchAllData]);
-
-  // QRコード・バーコードスキャナーの制御 (ピント・離した位置での読み取りに最適化)
-  useEffect(() => {
-    if (isScannerOpen) {
-      const config = {
-        fps: 25,
-        // 枠を大きめに設定し、スマホを20cm程度離した位置でピントが合うように調整
-        qrbox: (viewfinderWidth, viewfinderHeight) => {
-          const width = Math.min(viewfinderWidth * 0.85, 320);
-          const height = Math.min(viewfinderHeight * 0.45, 180);
-          return { width: Math.max(width, 240), height: Math.max(height, 120) };
-        },
-        aspectRatio: 1.0,
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.QR_CODE
-        ]
-      };
-
-      const scanner = new Html5QrcodeScanner(
-        "reader",
-        config,
-        /* verbose= */ false
-      );
-
-      scanner.render(
-        (decodedText) => {
-          if (scannerTarget === 'search') {
-            setSearchQuery(decodedText);
-          } else if (scannerTarget === 'item_name') {
-            setItemFormData(prev => ({
-              ...prev,
-              name: prev.name ? `${prev.name} (${decodedText})` : decodedText
-            }));
-          }
-          setIsScannerOpen(false);
-          scanner.clear();
-        },
-        (error) => {
-          // 未検出フレームはスルー
-        }
-      );
-
-      scannerRef.current = scanner;
-
-      return () => {
-        if (scannerRef.current) {
-          scannerRef.current.clear().catch(err => console.error(err));
-        }
-      };
-    }
-  }, [isScannerOpen, scannerTarget]);
-
-  const openScannerFor = (target) => {
-    setScannerTarget(target);
-    setIsScannerOpen(true);
-  };
 
   const getLocationName = (item) => {
     if (!item.locations) return '未設定';
@@ -380,25 +311,14 @@ export default function App() {
             </div>
 
             <div className="space-y-2.5">
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                  <input type="text" placeholder="品名で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
-                  {searchQuery && (
-                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => openScannerFor('search')}
-                  className="px-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-bold shadow-sm transition shrink-0"
-                  title="バーコード/QRスキャン"
-                >
-                  <Camera className="w-4 h-4" />
-                  スキャン
-                </button>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                <input type="text" placeholder="品名・バーコード番号で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
@@ -525,31 +445,6 @@ export default function App() {
 
       </main>
 
-      {/* カメラ読み取りモーダル */}
-      {isScannerOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden p-4 space-y-3">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
-                <QrCode className="w-4 h-4 text-indigo-600" /> コードを枠内に合わせてください
-              </h3>
-              <button 
-                onClick={() => setIsScannerOpen(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div id="reader" className="w-full overflow-hidden rounded-xl border border-slate-200"></div>
-
-            <p className="text-[11px] font-semibold text-indigo-600 text-center bg-indigo-50 py-1.5 rounded-lg border border-indigo-100">
-              💡 スマホを【15〜20cmほど離して】かざすとピントが合います
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* 品目登録・編集モーダル */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
@@ -561,28 +456,17 @@ export default function App() {
               </button>
             </div>
 
-            {/* 品名 ＆ スキャンボタン */}
+            {/* 品名 */}
             <div>
-              <label className="text-[10px] text-slate-400 block mb-1">品名 <span className="text-rose-500">*</span></label>
-              <div className="flex gap-1.5">
-                <input 
-                  type="text" 
-                  placeholder="例: シャンプー" 
-                  value={itemFormData.name} 
-                  onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
-                  className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => openScannerFor('item_name')}
-                  className="px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1 font-bold shrink-0 transition"
-                  title="バーコードから読み込み"
-                >
-                  <Camera className="w-4 h-4 text-indigo-600" />
-                  コード読込
-                </button>
-              </div>
+              <label className="text-[10px] text-slate-400 block mb-1">品名・バーコード番号 <span className="text-rose-500">*</span></label>
+              <input 
+                type="text" 
+                placeholder="例: シャンプー または JANコード数字" 
+                value={itemFormData.name} 
+                onChange={e => setItemFormData({...itemFormData, name: e.target.value})} 
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
+                required
+              />
             </div>
 
             {/* カテゴリ ＆ 保管場所 */}
@@ -671,7 +555,7 @@ export default function App() {
                 type="text" 
                 placeholder="例: 1Fリネン室, フロント倉庫" 
                 value={locationName} 
-                onChange={e => setLocationName(e.target.value)} 
+                onChange={e => getLocationName && setLocationName(e.target.value)} 
                 className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-indigo-500" 
                 required
               />
