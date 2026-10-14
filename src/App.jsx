@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import { 
   Package, 
@@ -19,13 +19,13 @@ import {
   PlusCircle,
   History,
   Download,
-  BarChart3,
-  TrendingDown
+  QrCode,
+  Camera
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'analytics' | 'master'
+  const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'history' | 'master'
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -34,6 +34,10 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('すべて');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showToast, setShowToast] = useState(false);
+
+  // カメラ・スキャナー用ステート
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const scannerRef = useRef(null);
 
   // モーダル用ステート
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -88,13 +92,43 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchAllData]);
 
+  // QRコード・バーコードスキャナーの制御
+  useEffect(() => {
+    if (isScannerOpen) {
+      const scanner = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        /* verbose= */ false
+      );
+
+      scanner.render(
+        (decodedText) => {
+          setSearchQuery(decodedText);
+          setIsScannerOpen(false);
+          scanner.clear();
+        },
+        (error) => {
+          // フレーム単位のエラーは無視
+        }
+      );
+
+      scannerRef.current = scanner;
+
+      return () => {
+        if (scannerRef.current) {
+          scannerRef.current.clear().catch(err => console.error(err));
+        }
+      };
+    }
+  }, [isScannerOpen]);
+
   const getLocationName = (item) => {
     if (!item.locations) return '未設定';
     if (Array.isArray(item.locations)) return item.locations[0]?.name || '未設定';
     return item.locations.name || '未設定';
   };
 
-  // 2. 在庫数変更
+  // 在庫数変更
   const handleStockChange = async (item, delta) => {
     const previousStock = item.stock_quantity;
     const newStock = Math.max(0, previousStock + delta);
@@ -121,7 +155,7 @@ export default function App() {
     }
   };
 
-  // モーダル処理等
+  // モーダル処理
   const handleOpenItemModal = (item = null) => {
     if (item) {
       setEditingItem(item);
@@ -170,38 +204,6 @@ export default function App() {
     }
   };
 
-  const handleOpenLocationModal = (loc = null) => {
-    setEditingLocation(loc);
-    setLocationName(loc ? loc.name : '');
-    setIsLocationModalOpen(true);
-  };
-
-  const handleSaveLocation = async (e) => {
-    e.preventDefault();
-    if (!locationName.trim()) return alert('保管場所名を入力してください');
-    try {
-      if (editingLocation) {
-        await supabase.from('locations').update({ name: locationName.trim() }).eq('id', editingLocation.id);
-      } else {
-        await supabase.from('locations').insert([{ name: locationName.trim() }]);
-      }
-      setIsLocationModalOpen(false);
-      fetchAllData(true);
-    } catch (error) {
-      alert('保存に失敗しました');
-    }
-  };
-
-  const handleDeleteLocation = async (id) => {
-    if (!window.confirm('この保管場所を削除しますか？')) return;
-    try {
-      await supabase.from('locations').delete().eq('id', id);
-      fetchAllData(true);
-    } catch (error) {
-      alert('削除に失敗しました');
-    }
-  };
-
   const exportLogsToCSV = () => {
     if (logs.length === 0) return alert('出力する履歴データがありません');
     const headers = ['日時', '品名', '種別', '変動数', '担当者'];
@@ -223,24 +225,6 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // データ分析用集計（消費数TOP5）
-  const getTopConsumedItems = () => {
-    const consumptionMap = {};
-    logs.forEach(log => {
-      if (log.change_qty < 0 && log.items?.name) {
-        const name = log.items.name;
-        const qty = Math.abs(log.change_qty);
-        consumptionMap[name] = (consumptionMap[name] || 0) + qty;
-      }
-    });
-
-    return Object.entries(consumptionMap)
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 5);
-  };
-
-  const topConsumedData = getTopConsumedItems();
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
     const query = searchQuery.toLowerCase();
@@ -277,9 +261,6 @@ export default function App() {
           </button>
           <button onClick={() => setActiveTab('history')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'history' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
             <History className="w-3.5 h-3.5" /> 履歴
-          </button>
-          <button onClick={() => setActiveTab('analytics')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'analytics' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
-            <BarChart3 className="w-3.5 h-3.5" /> 分析
           </button>
           <button onClick={() => setActiveTab('master')} className={`flex-1 py-1.5 rounded-lg transition flex items-center justify-center gap-1 ${activeTab === 'master' ? 'bg-white text-indigo-800 shadow-sm' : 'text-indigo-100'}`}>
             <Settings className="w-3.5 h-3.5" /> 設定
@@ -320,9 +301,25 @@ export default function App() {
             </div>
 
             <div className="space-y-2.5">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                <input type="text" placeholder="品名・カテゴリで検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
+                  <input type="text" placeholder="品名で検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-800 focus:outline-none focus:border-indigo-500 shadow-sm" />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3 text-slate-400 hover:text-slate-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setIsScannerOpen(true)}
+                  className="px-3.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl flex items-center gap-1.5 text-xs font-bold shadow-sm transition shrink-0"
+                  title="バーコード/QRスキャン"
+                >
+                  <Camera className="w-4 h-4" />
+                  スキャン
+                </button>
               </div>
 
               <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
@@ -395,36 +392,7 @@ export default function App() {
           </div>
         )}
 
-        {/* タブ 3: 分析（ダッシュボード） */}
-        {activeTab === 'analytics' && (
-          <div className="space-y-4">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
-              <h2 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                <TrendingDown className="w-4 h-4 text-indigo-600" /> 消費数ランキング (累計TOP 5)
-              </h2>
-              {topConsumedData.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-6">消費データがありません</p>
-              ) : (
-                <div className="h-56 w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={topConsumedData} layout="vertical" margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" scale="band" tick={{ fontSize: 11, fill: '#475569' }} width={80} />
-                      <Tooltip formatter={(value) => [`${value} 個消費`, '消費量']} />
-                      <Bar dataKey="count" radius={[0, 8, 8, 0]}>
-                        {topConsumedData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe'][index % 5]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* タブ 4: マスター設定 */}
+        {/* タブ 3: マスター設定 */}
         {activeTab === 'master' && (
           <div className="space-y-6">
             <div className="space-y-3">
@@ -452,7 +420,32 @@ export default function App() {
 
       </main>
 
-      {/* モーダル群 (省略なし) */}
+      {/* カメラ読み取りモーダル */}
+      {isScannerOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden p-4 space-y-3">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                <QrCode className="w-4 h-4 text-indigo-600" /> コードを枠内に合わせてください
+              </h3>
+              <button 
+                onClick={() => setIsScannerOpen(false)} 
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div id="reader" className="w-full overflow-hidden rounded-xl border border-slate-200"></div>
+
+            <p className="text-[11px] text-slate-400 text-center">
+              バーコードまたはQRコードをかざすと、該当の消耗品を自動検索します
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 品目登録・編集モーダル */}
       {isItemModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden p-5 space-y-3 text-xs font-semibold">
