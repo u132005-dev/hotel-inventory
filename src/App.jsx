@@ -18,7 +18,9 @@ import {
   X,
   PlusCircle,
   History,
-  Download
+  Download,
+  ClipboardList,
+  Copy
 } from 'lucide-react';
 
 export default function App() {
@@ -34,6 +36,10 @@ export default function App() {
 
   // 音声入力用ステート
   const [isListening, setIsListening] = useState(false);
+
+  // 発注リストモーダル用ステート
+  const [isOrderListModalOpen, setIsOrderListModalOpen] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // モーダル用ステート（品目）
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
@@ -272,13 +278,28 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  // 要発注リストの抽出
+  const lowStockItems = items.filter(i => i.stock_quantity <= i.reorder_point);
+  const lowStockCount = lowStockItems.length;
+
+  // 発注リストのクリップボードコピー
+  const copyOrderListToClipboard = () => {
+    const textList = lowStockItems.map(item => `・${item.name}: 現在 ${item.stock_quantity}${item.unit} (目安: ${item.reorder_point}${item.unit}) [保管: ${getLocationName(item)}]`).join('\n');
+    const header = `【要発注リスト】 (${new Date().toLocaleDateString('ja-JP')})\n`;
+    const fullText = header + (textList || '発注必要なアイテムはありません');
+
+    navigator.clipboard.writeText(fullText).then(() => {
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    });
+  };
+
   const categories = ['すべて', ...Array.from(new Set(items.map(i => i.category).filter(Boolean)))];
   const filteredItems = items.filter(item => {
     const query = searchQuery.toLowerCase();
     return (item.name.toLowerCase().includes(query) || (item.category && item.category.toLowerCase().includes(query))) &&
            (selectedCategory === 'すべて' || item.category === selectedCategory);
   });
-  const lowStockCount = items.filter(i => i.stock_quantity <= i.reorder_point).length;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 pb-20 font-sans relative select-none">
@@ -347,14 +368,26 @@ export default function App() {
                 <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100"><Layers className="w-5 h-5" /></div>
               </div>
 
-              <div className={`border rounded-2xl p-3.5 shadow-sm flex items-center justify-between transition ${lowStockCount > 0 ? 'bg-amber-50/80 border-amber-300 text-amber-900' : 'bg-emerald-50/80 border-emerald-300 text-emerald-900'}`}>
-                <div>
-                  <span className="text-xs text-slate-500 block font-medium">要発注アラート</span>
-                  <span className={`text-2xl font-black ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{lowStockCount} <span className="text-xs font-normal text-slate-500">品</span></span>
+              {/* 要発注アラートカード（発注リスト確認ボタン付き） */}
+              <div className={`border rounded-2xl p-3.5 shadow-sm flex flex-col justify-between transition ${lowStockCount > 0 ? 'bg-amber-50/90 border-amber-300 text-amber-900' : 'bg-emerald-50/90 border-emerald-300 text-emerald-900'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs text-slate-500 block font-medium">要発注アラート</span>
+                    <span className={`text-2xl font-black ${lowStockCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{lowStockCount} <span className="text-xs font-normal text-slate-500">品</span></span>
+                  </div>
+                  <div className={`p-2.5 rounded-xl border ${lowStockCount > 0 ? 'bg-amber-100 text-amber-600 border-amber-200 animate-pulse' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>
+                    {lowStockCount > 0 ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+                  </div>
                 </div>
-                <div className={`p-2.5 rounded-xl border ${lowStockCount > 0 ? 'bg-amber-100 text-amber-600 border-amber-200 animate-pulse' : 'bg-emerald-100 text-emerald-600 border-emerald-200'}`}>
-                  {lowStockCount > 0 ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-                </div>
+
+                {lowStockCount > 0 && (
+                  <button 
+                    onClick={() => setIsOrderListModalOpen(true)}
+                    className="mt-2 w-full py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-[11px] font-bold shadow-sm transition flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" /> 発注リストを見る
+                  </button>
+                )}
               </div>
             </div>
 
@@ -505,6 +538,56 @@ export default function App() {
         )}
 
       </main>
+
+      {/* 発注リスト確認モーダル */}
+      {isOrderListModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden p-5 space-y-4 text-xs font-semibold">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
+                <ClipboardList className="w-4 h-4 text-amber-600" /> 要発注リスト（買い物リスト）
+              </h3>
+              <button onClick={() => setIsOrderListModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-3 space-y-2 max-h-60 overflow-y-auto divide-y divide-amber-100">
+              {lowStockItems.length === 0 ? (
+                <p className="text-center text-slate-500 py-4">現在、要発注の品目はありません 🎉</p>
+              ) : (
+                lowStockItems.map(item => (
+                  <div key={item.id} className="pt-2 first:pt-0 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-slate-800 text-sm">{item.name}</p>
+                      <p className="text-[11px] text-slate-500">保管: {getLocationName(item)} | 目安: {item.reorder_point}{item.unit}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-amber-600 font-black text-base">{item.stock_quantity}</span>
+                      <span className="text-slate-500 text-xs">{item.unit}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button 
+                onClick={copyOrderListToClipboard} 
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-4 h-4" /> {copySuccess ? 'コピーしました！' : 'リストをコピー'}
+              </button>
+              <button 
+                onClick={() => setIsOrderListModalOpen(false)} 
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 品目登録・編集モーダル */}
       {isItemModalOpen && (
